@@ -43,18 +43,16 @@
 // STVL
 #include <spatio_temporal_voxel_layer/frustum_models/frustum.hpp>
 
-namespace geometry
-{
+namespace geometry {
 
 // visualize the frustum should someone other than me care
 #define VISUALIZE_FRUSTUM 0
 
 // A class to model a depth sensor frustum in world space
-class DepthCameraFrustum : public Frustum
-{
-public:
+class DepthCameraFrustum : public Frustum {
+ public:
   DepthCameraFrustum(const double& vFOV, const double& hFOV,
-          const double& min_dist, const double& max_dist);
+                     const double& min_dist, const double& max_dist);
   virtual ~DepthCameraFrustum(void);
 
   // transform plane normals by depth camera pose
@@ -67,7 +65,7 @@ public:
   virtual void SetPosition(const geometry_msgs::Point& origin);
   virtual void SetOrientation(const geometry_msgs::Quaternion& quat);
 
-private:
+ private:
   // utils to find useful frustum metadata
   void ComputePlaneNormals(void);
   double Dot(const VectorWithPt3D&, const openvdb::Vec3d&) const;
@@ -79,12 +77,12 @@ private:
   Eigen::Quaterniond _orientation;
   bool _valid_frustum;
 
-  #if VISUALIZE_FRUSTUM
-    std::vector<Eigen::Vector3d> _frustum_pts;
-    ros::Publisher _frustumPub;
-  #endif
+#if VISUALIZE_FRUSTUM
+  std::vector<Eigen::Vector3d> _frustum_pts;
+  ros::Publisher _frustumPub;
+#endif
 };
 
-} // end namespace
+}  // namespace geometry
 
 #endif

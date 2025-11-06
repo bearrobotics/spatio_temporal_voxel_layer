@@ -41,23 +41,24 @@
 #define VOLUME_GRID_H_
 
 // PCL
-#include <pcl_ros/transforms.h>
 #include <pcl/PCLPointCloud2.h>
+#include <pcl_ros/transforms.h>
 // ROS
 #include <ros/ros.h>
 // STL
 #include <math.h>
-#include <unordered_map>
-#include <unordered_set>
+
 #include <ctime>
 #include <iostream>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 // msgs
+#include <geometry_msgs/Point.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <sensor_msgs/point_cloud2_iterator.h>
 #include <visualization_msgs/Marker.h>
-#include <geometry_msgs/Point.h>
 // TBB
 #include <tbb/parallel_do.h>
 // OpenVDB
@@ -65,50 +66,34 @@
 #include <openvdb/tools/GridTransformer.h>
 #include <openvdb/tools/RayIntersector.h>
 // measurement struct and buffer
-#include <spatio_temporal_voxel_layer/measurement_buffer.hpp>
 #include <spatio_temporal_voxel_layer/frustum_models/depth_camera_frustum.hpp>
 #include <spatio_temporal_voxel_layer/frustum_models/three_dimensional_lidar_frustum.hpp>
+#include <spatio_temporal_voxel_layer/measurement_buffer.hpp>
 // Mutex and locks
 #include <boost/thread.hpp>
 #include <boost/thread/recursive_mutex.hpp>
 
-namespace volume_grid
-{
+namespace volume_grid {
 
-enum GlobalDecayModel
-{
-  LINEAR = 0,
-  EXPONENTIAL = 1,
-  PERSISTENT = 2
-};
+enum GlobalDecayModel { LINEAR = 0, EXPONENTIAL = 1, PERSISTENT = 2 };
 
 // Structure for an occupied cell for map
-struct occupany_cell
-{
-  occupany_cell(const double& _x, const double& _y) :
-    x(_x), y(_y)
-  {
-  }
+struct occupany_cell {
+  occupany_cell(const double& _x, const double& _y) : x(_x), y(_y) {}
 
-  bool operator==(const occupany_cell& other) const
-  {
-    return x==other.x && y==other.y;
+  bool operator==(const occupany_cell& other) const {
+    return x == other.x && y == other.y;
   }
 
   double x, y;
 };
 
 // Structure for wrapping frustum model and necessary metadata
-struct frustum_model
-{
-  frustum_model(geometry::Frustum* _frustum, const double& _factor) :
-    frustum(_frustum), accel_factor(_factor)
-  {
-  }
-  ~frustum_model()
-  {
-    if (frustum)
-    {
+struct frustum_model {
+  frustum_model(geometry::Frustum* _frustum, const double& _factor)
+      : frustum(_frustum), accel_factor(_factor) {}
+  ~frustum_model() {
+    if (frustum) {
       delete frustum;
     }
   }
@@ -117,23 +102,25 @@ struct frustum_model
 };
 
 // Core voxel grid structure and interface
-class SpatioTemporalVoxelGrid
-{
-public:
+class SpatioTemporalVoxelGrid {
+ public:
   // conveniences for line lengths
   typedef openvdb::math::Ray<openvdb::Real> GridRay;
   typedef openvdb::math::Ray<openvdb::Real>::Vec3T Vec3Type;
 
-  SpatioTemporalVoxelGrid(const float& voxel_size, const double& background_value,
+  SpatioTemporalVoxelGrid(const float& voxel_size,
+                          const double& background_value,
                           const int& decay_model, const double& voxel_decay,
                           const bool& pub_voxels);
   ~SpatioTemporalVoxelGrid(void);
 
   // Core making and clearing functions
-  void Mark(const std::vector<observation::MeasurementReading>& marking_observations);
+  void Mark(
+      const std::vector<observation::MeasurementReading>& marking_observations);
   void operator()(const observation::MeasurementReading& obs) const;
-  void ClearFrustums(const std::vector<observation::MeasurementReading>& clearing_observations, \
-                     std::unordered_set<occupany_cell>& cleared_cells);
+  void ClearFrustums(
+      const std::vector<observation::MeasurementReading>& clearing_observations,
+      std::unordered_set<occupany_cell>& cleared_cells);
 
   // Get the pointcloud of the underlying occupancy grid
   void GetOccupancyPointCloud(sensor_msgs::PointCloud2::Ptr& pc2);
@@ -141,12 +128,13 @@ public:
 
   // Clear the grid
   bool ResetGrid(void);
-  void ResetGridArea(const occupany_cell& start, const occupany_cell& end, bool invert_area=false);
+  void ResetGridArea(const occupany_cell& start, const occupany_cell& end,
+                     bool invert_area = false);
 
   // Save the file to file with size information
   bool SaveGrid(const std::string& file_name, double& map_size_bytes);
 
-protected:
+ protected:
   // Initialize grid metadata and library
   void InitializeGrid(void);
 
@@ -159,10 +147,11 @@ protected:
 
   // Get time information for clearing
   double GetTemporalClearingDuration(const double& time_delta);
-  double GetFrustumAcceleration(const double& time_delta, \
+  double GetFrustumAcceleration(const double& time_delta,
                                 const double& acceleration_factor);
-  void TemporalClearAndGenerateCostmap(std::vector<frustum_model>& frustums, \
-                                       std::unordered_set<occupany_cell>& cleared_cells);
+  void TemporalClearAndGenerateCostmap(
+      std::vector<frustum_model>& frustums,
+      std::unordered_set<occupany_cell>& cleared_cells);
 
   // Populate the costmap ROS api and pointcloud with a marked point
   void PopulateCostmapAndPointcloud(const openvdb::Coord& pt);
@@ -172,27 +161,25 @@ protected:
   openvdb::Vec3d IndexToWorld(const openvdb::Coord& coord) const;
 
   mutable openvdb::DoubleGrid::Ptr _grid;
-  int                             _decay_model;
-  double                          _background_value, _voxel_size, _voxel_decay;
-  bool                            _pub_voxels;
-  std::vector<geometry_msgs::Point32>*   _grid_points;
+  int _decay_model;
+  double _background_value, _voxel_size, _voxel_decay;
+  bool _pub_voxels;
+  std::vector<geometry_msgs::Point32>* _grid_points;
   std::unordered_map<occupany_cell, uint>* _cost_map;
-  boost::mutex                            _grid_lock;
+  boost::mutex _grid_lock;
 };
 
-} // end volume_grid namespace
+}  // namespace volume_grid
 
 // hash function for unordered_map of occupancy_cells
 namespace std {
 template <>
-struct hash<volume_grid::occupany_cell>
-{
-  std::size_t operator()(const volume_grid::occupany_cell& k) const
-  {
+struct hash<volume_grid::occupany_cell> {
+  std::size_t operator()(const volume_grid::occupany_cell& k) const {
     return ((std::hash<double>()(k.x) ^ (std::hash<double>()(k.y) << 1)) >> 1);
   }
 };
 
-} // end std namespace
+}  // namespace std
 
 #endif

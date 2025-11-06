@@ -42,70 +42,52 @@
 // measurement structs
 #include <spatio_temporal_voxel_layer/measurement_reading.h>
 // PCL
-#include <pcl_ros/transforms.h>
+#include <pcl/filters/passthrough.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl_conversions/pcl_conversions.h>
-#include <pcl/filters/passthrough.h>
+#include <pcl_ros/transforms.h>
 // STL
-#include <vector>
 #include <list>
 #include <string>
+#include <vector>
 // ROS
 #include <ros/ros.h>
 #include <ros/time.h>
 // TF
 #include <tf2_ros/buffer.h>
+
 #include "message_filters/subscriber.h"
 // msgs
-#include <sensor_msgs/PointCloud2.h>
-#include <geometry_msgs/Quaternion.h>
 #include <geometry_msgs/PoseStamped.h>
+#include <geometry_msgs/Quaternion.h>
 #include <geometry_msgs/TransformStamped.h>
+#include <sensor_msgs/PointCloud2.h>
 // Mutex
 #include <boost/thread.hpp>
 
-namespace buffer
-{
+namespace buffer {
 
-enum class Filters
-{
-  NONE = 0,
-  VOXEL = 1,
-  PASSTHROUGH = 2
-};
+enum class Filters { NONE = 0, VOXEL = 1, PASSTHROUGH = 2 };
 
 // conveniences for line lengths
 typedef std::list<observation::MeasurementReading>::iterator readings_iter;
 typedef sensor_msgs::PointCloud2::Ptr point_cloud_ptr;
 
 // Measurement buffer
-class MeasurementBuffer
-{
-public:
-  MeasurementBuffer(const std::string& topic_name,          \
-                    const double& observation_keep_time,    \
-                    const double& expected_update_rate,     \
-                    const double& min_obstacle_height,      \
-                    const double& max_obstacle_height,      \
-                    const double& obstacle_range,           \
-                    tf2_ros::Buffer& tf,                    \
-                    const std::string& global_frame,        \
-                    const std::string& sensor_frame,        \
-                    const double& tf_tolerance,             \
-                    const double& min_d,                    \
-                    const double& max_d,                    \
-                    const double& vFOV,                     \
-                    const double& vFOVPadding,              \
-                    const double& hFOV,                     \
-                    const double& decay_acceleration,       \
-                    const bool& marking,                    \
-                    const bool& clearing,                   \
-                    const double& voxel_size,               \
-                    const Filters& filter,                  \
-                    const int& voxel_min_points,            \
-                    const bool& enabled,                    \
-                    const bool& clear_buffer_after_reading, \
-                    const ModelType& model_type);
+class MeasurementBuffer {
+ public:
+  MeasurementBuffer(
+      const std::string& topic_name, const double& observation_keep_time,
+      const double& expected_update_rate, const double& min_obstacle_height,
+      const double& max_obstacle_height, const double& obstacle_range,
+      tf2_ros::Buffer& tf, const std::string& global_frame,
+      const std::string& sensor_frame, const double& tf_tolerance,
+      const double& min_d, const double& max_d, const double& vFOV,
+      const double& vFOVPadding, const double& hFOV,
+      const double& decay_acceleration, const bool& marking,
+      const bool& clearing, const double& voxel_size, const Filters& filter,
+      const int& voxel_min_points, const bool& enabled,
+      const bool& clear_buffer_after_reading, const ModelType& model_type);
 
   ~MeasurementBuffer(void);
 
@@ -129,7 +111,7 @@ public:
   void Lock(void);
   void Unlock(void);
 
-private:
+ private:
   // Removing old observations from buffer
   void RemoveStaleObservations(void);
 
@@ -139,15 +121,16 @@ private:
   ros::Time _last_updated;
   std::string _global_frame, _topic_name, _sensor_frame;
   std::list<observation::MeasurementReading> _observation_list;
-  double _min_obstacle_height, _max_obstacle_height, _obstacle_range, _tf_tolerance;
+  double _min_obstacle_height, _max_obstacle_height, _obstacle_range,
+      _tf_tolerance;
   double _min_z, _max_z, _vertical_fov, _vertical_fov_padding, _horizontal_fov;
-  double  _decay_acceleration, _voxel_size;
+  double _decay_acceleration, _voxel_size;
   bool _marking, _clearing, _clear_buffer_after_reading, _enabled;
   Filters _filter;
   int _voxel_min_points;
   ModelType _model_type;
 };
 
-} // namespace buffer
+}  // namespace buffer
 
-#endif // MEASUREMENT_BUFFER_H_
+#endif  // MEASUREMENT_BUFFER_H_

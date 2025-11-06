@@ -45,15 +45,14 @@
 // M_PI
 #include <cmath>
 
-namespace geometry
-{
+namespace geometry {
 
 // A class to model a spinning 3D Lidar frustum in world space
-class ThreeDimensionalLidarFrustum : public Frustum
-{
-public:
-  ThreeDimensionalLidarFrustum(const double& vFOV, const double& vFOVPadding, 
-          const double& hFOV, const double& min_dist, const double& max_dist);
+class ThreeDimensionalLidarFrustum : public Frustum {
+ public:
+  ThreeDimensionalLidarFrustum(const double& vFOV, const double& vFOVPadding,
+                               const double& hFOV, const double& min_dist,
+                               const double& max_dist);
   virtual ~ThreeDimensionalLidarFrustum(void);
 
   // Does nothing in 3D lidar model
@@ -66,7 +65,7 @@ public:
   virtual void SetPosition(const geometry_msgs::Point& origin);
   virtual void SetOrientation(const geometry_msgs::Quaternion& quat);
 
-private:
+ private:
   // utils to find useful frustum metadata
   double Dot(const VectorWithPt3D&, const openvdb::Vec3d&) const;
   double Dot(const VectorWithPt3D&, const Eigen::Vector3d&) const;
@@ -81,9 +80,8 @@ private:
   Eigen::Quaterniond _orientation_conjugate;
   bool _valid_frustum;
   bool _full_hFOV;
-
 };
 
-} // end namespace
+}  // namespace geometry
 
 #endif

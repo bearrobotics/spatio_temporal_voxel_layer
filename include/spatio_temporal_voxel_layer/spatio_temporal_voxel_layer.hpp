@@ -42,62 +42,68 @@
 #define VOLUME_GRID_LAYER_H_
 
 // voxel grid
-#include <spatio_temporal_voxel_layer/spatio_temporal_voxel_grid.hpp>
 #include <spatio_temporal_voxel_layer/SpatioTemporalVoxelLayerConfig.h>
+
+#include <spatio_temporal_voxel_layer/spatio_temporal_voxel_grid.hpp>
 // ROS
-#include <ros/ros.h>
-#include <message_filters/subscriber.h>
 #include <dynamic_reconfigure/server.h>
+#include <message_filters/subscriber.h>
+#include <ros/ros.h>
 // costmap
-#include <costmap_2d/layer.h>
-#include <costmap_2d/layered_costmap.h>
 #include <costmap_2d/costmap_layer.h>
 #include <costmap_2d/footprint.h>
+#include <costmap_2d/layer.h>
+#include <costmap_2d/layered_costmap.h>
 // openVDB
 #include <openvdb/openvdb.h>
 // STL
-#include <vector>
-#include <string>
-#include <iostream>
 #include <time.h>
+
+#include <iostream>
+#include <string>
+#include <vector>
 // msgs
+#include <geometry_msgs/Point.h>
 #include <sensor_msgs/LaserScan.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <sensor_msgs/point_cloud_conversion.h>
-#include <geometry_msgs/Point.h>
 #include <spatio_temporal_voxel_layer/SaveGrid.h>
 #include <std_srvs/SetBool.h>
 // projector
 #include <laser_geometry/laser_geometry.h>
 // tf
-#include "tf2_ros/transform_listener.h"
-#include "tf2_ros/message_filter.h"
-#include "message_filters/subscriber.h"
-#include "tf2_geometry_msgs/tf2_geometry_msgs.h"
 #include <tf2/buffer_core.h>
 
-namespace spatio_temporal_voxel_layer
-{
+#include "message_filters/subscriber.h"
+#include "tf2_geometry_msgs/tf2_geometry_msgs.h"
+#include "tf2_ros/message_filter.h"
+#include "tf2_ros/transform_listener.h"
+
+namespace spatio_temporal_voxel_layer {
 
 // conveniences for line lengths
-typedef std::vector<boost::shared_ptr<message_filters::SubscriberBase> >::iterator observation_subscribers_iter;
-typedef std::vector<boost::shared_ptr<buffer::MeasurementBuffer> >::iterator observation_buffers_iter;
-typedef spatio_temporal_voxel_layer::SpatioTemporalVoxelLayerConfig dynamicReconfigureType;
-typedef dynamic_reconfigure::Server<dynamicReconfigureType> dynamicReconfigureServerType;
+typedef std::vector<boost::shared_ptr<message_filters::SubscriberBase> >::
+    iterator observation_subscribers_iter;
+typedef std::vector<boost::shared_ptr<buffer::MeasurementBuffer> >::iterator
+    observation_buffers_iter;
+typedef spatio_temporal_voxel_layer::SpatioTemporalVoxelLayerConfig
+    dynamicReconfigureType;
+typedef dynamic_reconfigure::Server<dynamicReconfigureType>
+    dynamicReconfigureServerType;
 
 // Core ROS voxel layer class
-class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer
-{
-public:
+class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
+ public:
   SpatioTemporalVoxelLayer(void);
   virtual ~SpatioTemporalVoxelLayer(void);
 
   // Core Functions
   virtual void onInitialize(void);
-  virtual void updateBounds(double robot_x, double robot_y, double robot_yaw, \
-                   double* min_x, double* min_y, double* max_x, double* max_y);
-  virtual void updateCosts(costmap_2d::Costmap2D& master_grid, int min_i, int min_j, \
-                                                               int max_i, int max_j);
+  virtual void updateBounds(double robot_x, double robot_y, double robot_yaw,
+                            double* min_x, double* min_y, double* max_x,
+                            double* max_y);
+  virtual void updateCosts(costmap_2d::Costmap2D& master_grid, int min_i,
+                           int min_j, int max_i, int max_j);
 
   // Functions to interact with other layers
   virtual void matchSize(void);
@@ -106,72 +112,83 @@ public:
   virtual void reset(void);
   virtual void activate(void);
   virtual void deactivate(void);
-  virtual void clearArea(int start_x, int start_y, int end_x, int end_y, bool invert_area=false) override;
-
+  virtual void clearArea(int start_x, int start_y, int end_x, int end_y,
+                         bool invert_area = false) override;
 
   // Functions for sensor feeds
-  bool GetMarkingObservations(std::vector<observation::MeasurementReading>& marking_observations) const;
-  bool GetClearingObservations(std::vector<observation::MeasurementReading>& marking_observations) const;
+  bool GetMarkingObservations(
+      std::vector<observation::MeasurementReading>& marking_observations) const;
+  bool GetClearingObservations(
+      std::vector<observation::MeasurementReading>& marking_observations) const;
   void ObservationsResetAfterReading() const;
 
   // Functions to interact with maps
-  void UpdateROSCostmap(double* min_x, double* min_y, double* max_x, double* max_y, \
-                        std::unordered_set<volume_grid::occupany_cell>& cleared_cells);
-  bool updateFootprint(double robot_x, double robot_y, double robot_yaw, \
-                       double* min_x, double* min_y, double* max_x, double* max_y);
+  void UpdateROSCostmap(
+      double* min_x, double* min_y, double* max_x, double* max_y,
+      std::unordered_set<volume_grid::occupany_cell>& cleared_cells);
+  bool updateFootprint(double robot_x, double robot_y, double robot_yaw,
+                       double* min_x, double* min_y, double* max_x,
+                       double* max_y);
   void ResetGrid(void);
 
   // Saving grids callback for openVDB
-  bool SaveGridCallback(spatio_temporal_voxel_layer::SaveGrid::Request& req, \
+  bool SaveGridCallback(spatio_temporal_voxel_layer::SaveGrid::Request& req,
                         spatio_temporal_voxel_layer::SaveGrid::Response& resp);
 
-private:
+ private:
   // Sensor callbacks
-  void LaserScanCallback(const sensor_msgs::LaserScanConstPtr& message, \
-                         const boost::shared_ptr<buffer::MeasurementBuffer>& buffer);
-  void LaserScanValidInfCallback(const sensor_msgs::LaserScanConstPtr& raw_message, \
-                                 const boost::shared_ptr<buffer::MeasurementBuffer>& buffer);
-  void PointCloud2Callback(const sensor_msgs::PointCloud2ConstPtr& message, \
-                          const boost::shared_ptr<buffer::MeasurementBuffer>& buffer);
+  void LaserScanCallback(
+      const sensor_msgs::LaserScanConstPtr& message,
+      const boost::shared_ptr<buffer::MeasurementBuffer>& buffer);
+  void LaserScanValidInfCallback(
+      const sensor_msgs::LaserScanConstPtr& raw_message,
+      const boost::shared_ptr<buffer::MeasurementBuffer>& buffer);
+  void PointCloud2Callback(
+      const sensor_msgs::PointCloud2ConstPtr& message,
+      const boost::shared_ptr<buffer::MeasurementBuffer>& buffer);
 
   // Functions for adding static obstacle zones
   bool AddStaticObservations(const observation::MeasurementReading& obs);
   bool RemoveStaticObservations(void);
 
   // Dynamic reconfigure
-  void DynamicReconfigureCallback(dynamicReconfigureType &config, uint32_t level);
+  void DynamicReconfigureCallback(dynamicReconfigureType& config,
+                                  uint32_t level);
 
   // Enable/Disable callback
-  bool BufferEnablerCallback( std_srvs::SetBool::Request & request,    \
-                              std_srvs::SetBool::Response & response,  \
-                              boost::shared_ptr<buffer::MeasurementBuffer>& buffer, \
-                              boost::shared_ptr<message_filters::SubscriberBase>& subcriber);
+  bool BufferEnablerCallback(
+      std_srvs::SetBool::Request& request,
+      std_srvs::SetBool::Response& response,
+      boost::shared_ptr<buffer::MeasurementBuffer>& buffer,
+      boost::shared_ptr<message_filters::SubscriberBase>& subcriber);
 
+  laser_geometry::LaserProjection _laser_projector;
+  std::vector<boost::shared_ptr<message_filters::SubscriberBase> >
+      _observation_subscribers;
+  std::vector<boost::shared_ptr<tf2_ros::MessageFilterBase> >
+      _observation_notifiers;
+  std::vector<boost::shared_ptr<buffer::MeasurementBuffer> >
+      _observation_buffers;
+  std::vector<boost::shared_ptr<buffer::MeasurementBuffer> > _marking_buffers;
+  std::vector<boost::shared_ptr<buffer::MeasurementBuffer> > _clearing_buffers;
+  std::vector<ros::ServiceServer> _buffer_enabler_servers;
+  dynamicReconfigureServerType* _dynamic_reconfigure_server;
 
-  laser_geometry::LaserProjection                                  _laser_projector;
-  std::vector<boost::shared_ptr<message_filters::SubscriberBase> > _observation_subscribers;
-  std::vector<boost::shared_ptr<tf2_ros::MessageFilterBase> >           _observation_notifiers;
-  std::vector<boost::shared_ptr<buffer::MeasurementBuffer> >       _observation_buffers;
-  std::vector<boost::shared_ptr<buffer::MeasurementBuffer> >       _marking_buffers;
-  std::vector<boost::shared_ptr<buffer::MeasurementBuffer> >       _clearing_buffers;
-  std::vector<ros::ServiceServer>                                  _buffer_enabler_servers;
-  dynamicReconfigureServerType*                                    _dynamic_reconfigure_server;
-
-  bool                                 _publish_voxels, _mapping_mode;
-  ros::Publisher                       _voxel_pub;
-  ros::ServiceServer                   _grid_saver;
-  ros::Duration                        _map_save_duration;
-  ros::Time                            _last_map_save_time;
-  std::string                          _global_frame;
-  double                               _voxel_size, _voxel_decay;
-  int                                  _combination_method, _mark_threshold;
-  volume_grid::GlobalDecayModel        _decay_model;
-  bool                                 _update_footprint_enabled, _enabled;
-  std::vector<geometry_msgs::Point>    _transformed_footprint;
+  bool _publish_voxels, _mapping_mode;
+  ros::Publisher _voxel_pub;
+  ros::ServiceServer _grid_saver;
+  ros::Duration _map_save_duration;
+  ros::Time _last_map_save_time;
+  std::string _global_frame;
+  double _voxel_size, _voxel_decay;
+  int _combination_method, _mark_threshold;
+  volume_grid::GlobalDecayModel _decay_model;
+  bool _update_footprint_enabled, _enabled;
+  std::vector<geometry_msgs::Point> _transformed_footprint;
   std::vector<observation::MeasurementReading> _static_observations;
-  volume_grid::SpatioTemporalVoxelGrid*        _voxel_grid;
-  boost::recursive_mutex                       _voxel_grid_lock;
+  volume_grid::SpatioTemporalVoxelGrid* _voxel_grid;
+  boost::recursive_mutex _voxel_grid_lock;
 };
 
-}; // end namespace
+};  // namespace spatio_temporal_voxel_layer
 #endif

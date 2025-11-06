@@ -43,17 +43,16 @@
 // STL
 #include <iostream>
 
-namespace utilities
-{
+namespace utilities {
 
-class VDB2PCLPointCloud
-{
-public:
+class VDB2PCLPointCloud {
+ public:
   VDB2PCLPointCloud();
   void SetFile(const std::string& file_name);
   bool GetCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud);
-private:
+
+ private:
   std::string _file_name;
 };
 
-} // end namespace
+}  // namespace utilities

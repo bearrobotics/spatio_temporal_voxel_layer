@@ -36,17 +36,16 @@
  * Purpose: Test minimum configuration of costmap_2d
 /*********************************************************************/
 
-
-#include <ros/ros.h>
 #include <costmap_2d/costmap_2d_ros.h>
+#include <ros/ros.h>
 #include <tf/transform_broadcaster.h>
+
 #include <thread>
 
-#include "tf2_ros/transform_listener.h"
-#include "tf2_ros/message_filter.h"
 #include "message_filters/subscriber.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.h"
-
+#include "tf2_ros/message_filter.h"
+#include "tf2_ros/transform_listener.h"
 
 /*****************************************************************************/
 void TransformThread()
@@ -55,15 +54,14 @@ void TransformThread()
   tf::TransformBroadcaster tfB;
   tf::Transform transform;
   transform.setIdentity();
-  transform.setOrigin(tf::Vector3(2.,2.,0.));
+  transform.setOrigin(tf::Vector3(2., 2., 0.));
 
   ros::Rate r(20);
-  while (ros::ok())
-  {
-    tfB.sendTransform(tf::StampedTransform(transform, ros::Time::now(), \
-                                                        "map", "base_link"));
-    tfB.sendTransform(tf::StampedTransform(transform, ros::Time::now(), \
-                                                "base_link", "camera_link"));
+  while (ros::ok()) {
+    tfB.sendTransform(
+        tf::StampedTransform(transform, ros::Time::now(), "map", "base_link"));
+    tfB.sendTransform(tf::StampedTransform(transform, ros::Time::now(),
+                                           "base_link", "camera_link"));
     r.sleep();
     ros::spinOnce();
   }
@@ -83,8 +81,7 @@ int main(int argc, char **argv)
   costmap.start();
 
   ros::Rate r(10);
-  while (ros::ok())
-  {
+  while (ros::ok()) {
     // then make a thread to do something with a costmap pointer...
     ros::spinOnce();
     r.sleep();

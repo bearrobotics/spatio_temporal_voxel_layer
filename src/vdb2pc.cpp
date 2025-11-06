@@ -37,8 +37,7 @@
 
 #include <spatio_temporal_voxel_layer/vdb2pc.hpp>
 
-namespace utilities
-{
+namespace utilities {
 
 /*****************************************************************************/
 VDB2PCLPointCloud::VDB2PCLPointCloud()
@@ -66,26 +65,22 @@ bool VDB2PCLPointCloud::GetCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud)
   bool valid_grid = false;
 
   for (openvdb::io::File::NameIterator nameIter = file.beginName();
-                                nameIter != file.endName(); ++nameIter)
-  {
-    if (nameIter.gridName() == "SpatioTemporalVoxelLayer")
-    {
+       nameIter != file.endName(); ++nameIter) {
+    if (nameIter.gridName() == "SpatioTemporalVoxelLayer") {
       baseGrid = file.readGrid(nameIter.gridName());
       grid = openvdb::gridPtrCast<openvdb::DoubleGrid>(baseGrid);
       valid_grid = true;
     }
   }
 
-  if (!valid_grid)
-  {
+  if (!valid_grid) {
     std::cout << "No valid grid inside of provided file." << std::endl;
     return false;
   }
 
-  //populate pcl pointcloud
+  // populate pcl pointcloud
   openvdb::DoubleGrid::ValueOnCIter cit_grid = grid->cbeginValueOn();
-  for (cit_grid; cit_grid; ++cit_grid)
-  {
+  for (cit_grid; cit_grid; ++cit_grid) {
     const openvdb::Vec3d pt = grid->indexToWorld(cit_grid.getCoord());
     cloud->push_back(pcl::PointXYZ(pt[0], pt[1], pt[2]));
   }
@@ -93,4 +88,4 @@ bool VDB2PCLPointCloud::GetCloud(pcl::PointCloud<pcl::PointXYZ>::Ptr& cloud)
   return true;
 }
 
-} // end namespace
+}  // namespace utilities

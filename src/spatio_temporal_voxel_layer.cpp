@@ -110,9 +110,9 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
   }
 
   if (track_unknown_space) {
-    default_value_ = costmap_2d::NO_INFORMATION;
+    setDefaultValue(costmap_2d::NO_INFORMATION);
   } else {
-    default_value_ = costmap_2d::FREE_SPACE;
+    setDefaultValue(costmap_2d::FREE_SPACE);
   }
 
   _voxel_pub = nh.advertise<sensor_msgs::PointCloud2>("voxel_grid", 1);
@@ -121,7 +121,7 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
                           &SpatioTemporalVoxelLayer::SaveGridCallback, this);
 
   _voxel_grid = new volume_grid::SpatioTemporalVoxelGrid(
-      _voxel_size, (double)default_value_, _decay_model, _voxel_decay,
+      _voxel_size, (double)getDefaultValue(), _decay_model, _voxel_decay,
       _publish_voxels);
   matchSize();
   current_ = true;
@@ -207,11 +207,11 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
     _observation_buffers.push_back(boost::shared_ptr<buffer::MeasurementBuffer>(
         new buffer::MeasurementBuffer(
             topic, observation_keep_time, expected_update_rate,
-            min_obstacle_height, max_obstacle_height, obstacle_range, *tf_,
-            _global_frame, sensor_frame, transform_tolerance, min_z, max_z,
-            vFOV, vFOVPadding, hFOV, decay_acceleration, marking, clearing,
-            _voxel_size, filter, voxel_min_points, enabled, clear_after_reading,
-            model_type)));
+            min_obstacle_height, max_obstacle_height, obstacle_range,
+            tf_buffer_, _global_frame, sensor_frame, transform_tolerance, min_z,
+            max_z, vFOV, vFOVPadding, hFOV, decay_acceleration, marking,
+            clearing, _voxel_size, filter, voxel_min_points, enabled,
+            clear_after_reading, model_type)));
 
     // Add buffer to marking observation buffers
     if (marking == true) {
@@ -225,14 +225,14 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
 
     // create a callback for the topic
     if (data_type == "LaserScan") {
-      boost::shared_ptr<message_filters::Subscriber<sensor_msgs::LaserScan> >
+      boost::shared_ptr<message_filters::Subscriber<sensor_msgs::LaserScan>>
           sub(new message_filters::Subscriber<sensor_msgs::LaserScan>(
               g_nh, topic, 50));
       _observation_subscribers.push_back(sub);
 
-      boost::shared_ptr<tf2_ros::MessageFilter<sensor_msgs::LaserScan> > filter(
+      boost::shared_ptr<tf2_ros::MessageFilter<sensor_msgs::LaserScan>> filter(
           new tf2_ros::MessageFilter<sensor_msgs::LaserScan>(
-              *sub, *tf_, _global_frame, 50, 0));
+              *sub, tf_buffer_, _global_frame, 50, 0));
 
       if (inf_is_valid) {
         filter->registerCallback(
@@ -251,19 +251,19 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
     }
 
     else if (data_type == "PointCloud2") {
-      boost::shared_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2> >
-          sub(new message_filters::Subscriber<sensor_msgs::PointCloud2>(
-              g_nh, topic, 50));
+      auto sub = boost::make_shared<
+          message_filters::Subscriber<sensor_msgs::PointCloud2>>(g_nh, topic,
+                                                                 50);
       _observation_subscribers.push_back(sub);
 
-      boost::shared_ptr<tf2_ros::MessageFilter<sensor_msgs::PointCloud2> >
-          filter(new tf2_ros::MessageFilter<sensor_msgs::PointCloud2>(
-              *sub, *tf_, _global_frame, 50, 0));
+      auto filter =
+          boost::make_shared<tf2_ros::MessageFilter<sensor_msgs::PointCloud2>>(
+              *sub, tf_buffer_, _global_frame, 50, g_nh);
+
       filter->registerCallback(
           boost::bind(&SpatioTemporalVoxelLayer::PointCloud2Callback, this, _1,
                       _observation_buffers.back()));
 
-      _observation_subscribers.push_back(sub);
       _observation_notifiers.push_back(filter);
     }
 
@@ -310,8 +310,8 @@ void SpatioTemporalVoxelLayer::LaserScanCallback(
   sensor_msgs::PointCloud2 cloud;
   cloud.header = message->header;
   try {
-    _laser_projector.transformLaserScanToPointCloud(message->header.frame_id,
-                                                    *message, cloud, *tf_);
+    _laser_projector.transformLaserScanToPointCloud(
+        message->header.frame_id, *message, cloud, tf_buffer_);
   } catch (tf::TransformException& ex) {
     ROS_WARN("TF returned a transform exception to frame %s: %s",
              _global_frame.c_str(), ex.what());
@@ -342,7 +342,7 @@ void SpatioTemporalVoxelLayer::LaserScanValidInfCallback(
   cloud.header = message.header;
   try {
     _laser_projector.transformLaserScanToPointCloud(message.header.frame_id,
-                                                    message, cloud, *tf_);
+                                                    message, cloud, tf_buffer_);
   } catch (tf::TransformException& ex) {
     ROS_WARN("TF returned a transform exception to frame %s: %s",
              _global_frame.c_str(), ex.what());
@@ -451,10 +451,10 @@ void SpatioTemporalVoxelLayer::ObservationsResetAfterReading() const
 }
 
 /*****************************************************************************/
-bool SpatioTemporalVoxelLayer::updateFootprint(double robot_x, double robot_y,
-                                               double robot_yaw, double* min_x,
-                                               double* min_y, double* max_x,
-                                               double* max_y)
+bool SpatioTemporalVoxelLayer::updateFootprint(float robot_x, float robot_y,
+                                               float robot_yaw, float* min_x,
+                                               float* min_y, float* max_x,
+                                               float* max_y)
 /*****************************************************************************/
 {
   // updates layer costmap to include footprint for clearing in voxel grid
@@ -570,7 +570,7 @@ void SpatioTemporalVoxelLayer::DynamicReconfigureCallback(
     auto default_value = (config.track_unknown_space)
                              ? costmap_2d::NO_INFORMATION
                              : costmap_2d::FREE_SPACE;
-    default_value_ = default_value;
+    setDefaultValue(default_value);
     _voxel_size = config.voxel_size;
     _voxel_decay = config.voxel_decay;
     _decay_model =
@@ -579,7 +579,7 @@ void SpatioTemporalVoxelLayer::DynamicReconfigureCallback(
 
     delete _voxel_grid;
     _voxel_grid = new volume_grid::SpatioTemporalVoxelGrid(
-        _voxel_size, static_cast<double>(default_value_), _decay_model,
+        _voxel_size, static_cast<double>(getDefaultValue()), _decay_model,
         _voxel_decay, _publish_voxels);
   }
 }
@@ -629,7 +629,7 @@ void SpatioTemporalVoxelLayer::updateCosts(costmap_2d::Costmap2D& master_grid,
 
 /*****************************************************************************/
 void SpatioTemporalVoxelLayer::UpdateROSCostmap(
-    double* min_x, double* min_y, double* max_x, double* max_y,
+    float* min_x, float* min_y, float* max_x, float* max_y,
     std::unordered_set<volume_grid::occupany_cell>& cleared_cells)
 /*****************************************************************************/
 {
@@ -654,21 +654,16 @@ void SpatioTemporalVoxelLayer::UpdateROSCostmap(
 }
 
 /*****************************************************************************/
-void SpatioTemporalVoxelLayer::updateBounds(double robot_x, double robot_y,
-                                            double robot_yaw, double* min_x,
-                                            double* min_y, double* max_x,
-                                            double* max_y)
+void SpatioTemporalVoxelLayer::updateBounds(float robot_x, float robot_y,
+                                            float robot_yaw, float* min_x,
+                                            float* min_y, float* max_x,
+                                            float* max_y)
 /*****************************************************************************/
 {
   // grabs new max bounds for the costmap
   if (!_enabled) {
     return;
   }
-
-  // Required because UpdateROSCostmap will also lock if AFTER we lock here
-  // voxel_grid_lock, and if clearArea is called in between, we will have a
-  // deadlock
-  boost::unique_lock<mutex_t> cm_lock(*getMutex());
 
   boost::recursive_mutex::scoped_lock lock(_voxel_grid_lock);
 
@@ -752,22 +747,6 @@ bool SpatioTemporalVoxelLayer::SaveGridCallback(
   ROS_WARN("SpatioTemporalVoxelGrid: Failed to save grid.");
   resp.status = false;
   return false;
-}
-
-/********************************************************************************************************/
-void SpatioTemporalVoxelLayer::clearArea(int start_x, int start_y, int end_x,
-                                         int end_y, bool invert_area)
-/********************************************************************************************************/
-{
-  // convert map coords to world coords
-  volume_grid::occupany_cell start_world(0, 0);
-  volume_grid::occupany_cell end_world(0, 0);
-  mapToWorld(start_x, start_y, start_world.x, start_world.y);
-  mapToWorld(end_x, end_y, end_world.x, end_world.y);
-
-  boost::recursive_mutex::scoped_lock lock(_voxel_grid_lock);
-  _voxel_grid->ResetGridArea(start_world, end_world, invert_area);
-  CostmapLayer::clearArea(start_x, start_y, end_x, end_y, invert_area);
 }
 
 };  // namespace spatio_temporal_voxel_layer

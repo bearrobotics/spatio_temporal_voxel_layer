@@ -99,9 +99,9 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
 
   // Core Functions
   virtual void onInitialize(void);
-  virtual void updateBounds(double robot_x, double robot_y, double robot_yaw,
-                            double* min_x, double* min_y, double* max_x,
-                            double* max_y);
+  virtual void updateBounds(float robot_x, float robot_y, float robot_yaw,
+                            float* min_x, float* min_y, float* max_x,
+                            float* max_y);
   virtual void updateCosts(costmap_2d::Costmap2D& master_grid, int min_i,
                            int min_j, int max_i, int max_j);
 
@@ -112,8 +112,6 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
   virtual void reset(void);
   virtual void activate(void);
   virtual void deactivate(void);
-  virtual void clearArea(int start_x, int start_y, int end_x, int end_y,
-                         bool invert_area = false) override;
 
   // Functions for sensor feeds
   bool GetMarkingObservations(
@@ -124,11 +122,10 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
 
   // Functions to interact with maps
   void UpdateROSCostmap(
-      double* min_x, double* min_y, double* max_x, double* max_y,
+      float* min_x, float* min_y, float* max_x, float* max_y,
       std::unordered_set<volume_grid::occupany_cell>& cleared_cells);
-  bool updateFootprint(double robot_x, double robot_y, double robot_yaw,
-                       double* min_x, double* min_y, double* max_x,
-                       double* max_y);
+  bool updateFootprint(float robot_x, float robot_y, float robot_yaw,
+                       float* min_x, float* min_y, float* max_x, float* max_y);
   void ResetGrid(void);
 
   // Saving grids callback for openVDB
@@ -173,6 +170,8 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
   std::vector<boost::shared_ptr<buffer::MeasurementBuffer> > _clearing_buffers;
   std::vector<ros::ServiceServer> _buffer_enabler_servers;
   dynamicReconfigureServerType* _dynamic_reconfigure_server;
+  tf2_ros::Buffer tf_buffer_;
+  tf2_ros::TransformListener tf_listener_{tf_buffer_};
 
   bool _publish_voxels, _mapping_mode;
   ros::Publisher _voxel_pub;

@@ -59,8 +59,6 @@
 #include <sensor_msgs/PointCloud2.h>
 #include <sensor_msgs/point_cloud2_iterator.h>
 #include <visualization_msgs/Marker.h>
-// TBB
-#include <tbb/parallel_do.h>
 // OpenVDB
 #include <openvdb/openvdb.h>
 #include <openvdb/tools/GridTransformer.h>

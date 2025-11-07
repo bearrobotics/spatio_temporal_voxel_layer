@@ -37,6 +37,8 @@
 
 #include "spatio_temporal_voxel_layer/spatio_temporal_voxel_layer.hpp"
 
+#include "bearlib/ros/param_loader.h"
+
 namespace spatio_temporal_voxel_layer {
 
 /*****************************************************************************/
@@ -64,45 +66,49 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
            getName().c_str());
 
   // initialize parameters, grid, and sub/pubs
-  ros::NodeHandle nh("~/" + name_), g_nh, prefix_nh;
+  ros::NodeHandle nh(parent_nh_, name_), g_nh, prefix_nh;
 
   _global_frame = std::string(layered_costmap_->getGlobalFrameID());
-  ROS_INFO("%s's global frame is %s.", getName().c_str(),
-           _global_frame.c_str());
 
-  bool track_unknown_space;
-  double transform_tolerance, map_save_time;
-  std::string topics_string;
-  int decay_model_int;
   // source names
-  nh.param("observation_sources", topics_string, std::string(""));
+  std::string topics_string =
+      bear::lib::ros::LoadRequiredParam<std::string>(nh, "observation_sources");
   // timeout in seconds for transforms
-  nh.param("transform_tolerance", transform_tolerance, 0.2);
+  double transform_tolerance =
+      bear::lib::ros::LoadRequiredParam<double>(nh, "transform_tolerance");
   // whether to default on
-  nh.param("enabled", _enabled, true);
+  _enabled = bear::lib::ros::LoadRequiredParam<bool>(nh, "enabled");
   enabled_ = _enabled;  // costmap_2d for some unexplicable reason uses globals
   // publish the voxel grid to visualize
-  nh.param("publish_voxel_map", _publish_voxels, false);
+  _publish_voxels =
+      bear::lib::ros::LoadRequiredParam<bool>(nh, "publish_voxel_map");
   // size of each voxel in meters
-  nh.param("voxel_size", _voxel_size, 0.05);
+  _voxel_size = bear::lib::ros::LoadRequiredParam<double>(nh, "voxel_size");
   // 1=takes highest in layers, 0=takes current layer
-  nh.param("combination_method", _combination_method, 1);
+  _combination_method =
+      bear::lib::ros::LoadRequiredParam<int>(nh, "combination_method");
   // number of voxels per vertical needed to have obstacle
-  nh.param("mark_threshold", _mark_threshold, 0);
+  _mark_threshold =
+      bear::lib::ros::LoadRequiredParam<int>(nh, "mark_threshold");
   // clear under robot footprint
-  nh.param("update_footprint_enabled", _update_footprint_enabled, true);
+  _update_footprint_enabled =
+      bear::lib::ros::LoadRequiredParam<bool>(nh, "update_footprint_enabled");
   // keep tabs on unknown space
-  nh.param("track_unknown_space", track_unknown_space,
-           layered_costmap_->isTrackingUnknown());
-  nh.param("decay_model", decay_model_int, 0);
+  bool track_unknown_space =
+      bear::lib::ros::LoadOptionalParam<bool>(nh, "track_unknown_space")
+          .value_or(layered_costmap_->isTrackingUnknown());
+  int decay_model_int =
+      bear::lib::ros::LoadRequiredParam<int>(nh, "decay_model");
   _decay_model = static_cast<volume_grid::GlobalDecayModel>(decay_model_int);
   // decay param
-  nh.param("voxel_decay", _voxel_decay, -1.);
+  _voxel_decay = bear::lib::ros::LoadRequiredParam<double>(nh, "voxel_decay");
   // whether to map or navigate
-  nh.param("mapping_mode", _mapping_mode, false);
+  _mapping_mode = bear::lib::ros::LoadRequiredParam<bool>(nh, "mapping_mode");
+
   // if mapping, how often to save a map for safety
-  nh.param("map_save_duration", map_save_time, 60.);
-  ROS_INFO("%s loaded parameters from parameter server.", getName().c_str());
+  double map_save_time =
+      bear::lib::ros::LoadOptionalParam<double>(nh, "map_save_duration")
+          .value_or(60.0);
 
   if (_mapping_mode) {
     _map_save_duration = ros::Duration(map_save_time);
@@ -125,7 +131,6 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
       _publish_voxels);
   matchSize();
   current_ = true;
-  ROS_INFO("%s created underlying voxel grid.", getName().c_str());
 
   const std::string tf_prefix = tf::getPrefixParam(prefix_nh);
   std::stringstream ss(topics_string);

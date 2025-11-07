@@ -64,6 +64,7 @@ ros_plugin(
     deps = [
         ":cc_spatio_temporal_voxel_layer",
         ":cc_spatio_temporal_voxel_layer_cfg",
+        "//ROS/bearlib",
         "//ROS/external/navigation/costmap_2d",
         "//ROS/external/perception_pcl/pcl_ros:pcl_ros_tf",
         "//third_party/pcl:common",

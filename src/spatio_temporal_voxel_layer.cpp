@@ -38,6 +38,7 @@
 #include "spatio_temporal_voxel_layer/spatio_temporal_voxel_layer.hpp"
 
 #include "bearlib/ros/param_loader.h"
+#include "spatio_temporal_voxel_layer/filter_factory.h"
 
 namespace spatio_temporal_voxel_layer {
 
@@ -139,58 +140,61 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
     ros::NodeHandle source_node(nh, source);
 
     // get the parameters for the specific topic
-    double observation_keep_time, expected_update_rate, min_obstacle_height;
-    double max_obstacle_height, min_z, max_z, vFOV, vFOVPadding;
+    double observation_keep_time, expected_update_rate;
+    double min_z, max_z, vFOV, vFOVPadding;
     double hFOV, decay_acceleration;
     std::string topic, sensor_frame, data_type, filter_str;
     bool inf_is_valid, clearing, marking, clear_after_reading, enabled;
-    int voxel_min_points;
-    buffer::Filters filter;
 
-    source_node.param("topic", topic, source);
-    source_node.param("sensor_frame", sensor_frame, std::string(""));
-    source_node.param("observation_persistence", observation_keep_time, 0.0);
-    source_node.param("expected_update_rate", expected_update_rate, 0.0);
-    source_node.param("data_type", data_type, std::string("PointCloud2"));
-    source_node.param("min_obstacle_height", min_obstacle_height, 0.0);
-    source_node.param("max_obstacle_height", max_obstacle_height, 3.0);
-    source_node.param("inf_is_valid", inf_is_valid, false);
-    source_node.param("clearing", clearing, false);
-    source_node.param("marking", marking, true);
+    topic =
+        bear::lib::ros::LoadRequiredParam<std::string>(source_node, "topic");
+    sensor_frame = bear::lib::ros::LoadRequiredParam<std::string>(
+        source_node, "sensor_frame");
+    observation_keep_time = bear::lib::ros::LoadRequiredParam<double>(
+        source_node, "observation_persistence");
+    expected_update_rate = bear::lib::ros::LoadRequiredParam<double>(
+        source_node, "expected_update_rate");
+    data_type = bear::lib::ros::LoadRequiredParam<std::string>(source_node,
+                                                               "data_type");
+    inf_is_valid =
+        bear::lib::ros::LoadRequiredParam<bool>(source_node, "inf_is_valid");
+
+    clearing = bear::lib::ros::LoadRequiredParam<bool>(source_node, "clearing");
+    marking = bear::lib::ros::LoadRequiredParam<bool>(source_node, "marking");
     // minimum distance from camera it can see
-    source_node.param("min_z", min_z, 0.);
+    min_z = bear::lib::ros::LoadRequiredParam<double>(source_node, "min_z");
     // maximum distance from camera it can see
-    source_node.param("max_z", max_z, 10.);
+    max_z = bear::lib::ros::LoadRequiredParam<double>(source_node, "max_z");
     // vertical FOV angle in rad
-    source_node.param("vertical_fov_angle", vFOV, 0.7);
+    vFOV = bear::lib::ros::LoadRequiredParam<double>(source_node,
+                                                     "vertical_fov_angle");
     // vertical FOV padding in meters (3D lidar frustum only)
-    source_node.param("vertical_fov_padding", vFOVPadding, 0.0);
+    vFOVPadding = bear::lib::ros::LoadRequiredParam<double>(
+        source_node, "vertical_fov_padding");
     // horizontal FOV angle in rad
-    source_node.param("horizontal_fov_angle", hFOV, 1.04);
+    hFOV = bear::lib::ros::LoadRequiredParam<double>(source_node,
+                                                     "horizontal_fov_angle");
     // acceleration scales the model's decay in presence of readings
-    source_node.param("decay_acceleration", decay_acceleration, 0.);
-    // Apply a PCL filter (Approximate VoxeGrid or PassThrough) or skip
-    source_node.param("filter", filter_str, std::string("passthrough"));
-    // minimum points per voxel for voxel filter
-    source_node.param("voxel_min_points", voxel_min_points, 0);
+    decay_acceleration = bear::lib::ros::LoadRequiredParam<double>(
+        source_node, "decay_acceleration");
+
     // clears measurement buffer after reading values from it
-    source_node.param("clear_after_reading", clear_after_reading, false);
+    clear_after_reading = bear::lib::ros::LoadRequiredParam<bool>(
+        source_node, "clear_after_reading");
     // Whether the frustum is enabled on startup. Can be toggled with service
-    source_node.param("enabled", enabled, true);
+    enabled = bear::lib::ros::LoadRequiredParam<bool>(source_node, "enabled");
     // model type - default depth camera frustum model
     int model_type_int;
-    source_node.param("model_type", model_type_int, 0);
+    model_type_int =
+        bear::lib::ros::LoadRequiredParam<int>(source_node, "model_type");
     ModelType model_type = static_cast<ModelType>(model_type_int);
 
-    if (filter_str == "passthrough") {
-      ROS_INFO("Passthough filter activated.");
-      filter = buffer::Filters::PASSTHROUGH;
-    } else if (filter_str == "voxel") {
-      ROS_INFO("Voxel filter activated.");
-      filter = buffer::Filters::VOXEL;
-    } else {
-      ROS_INFO("No filters activated.");
-      filter = buffer::Filters::NONE;
+    // Apply a PCL filter (Approximate VoxeGrid or PassThrough) or skip
+    ros::NodeHandle filter_nh(source_node, "filter");
+    std::unique_ptr<Filter> filter = FilterFactory::CreateFilter(filter_nh);
+    if (!filter) {
+      ROS_FATAL("Failed to create filter of type: %s", filter_str.c_str());
+      throw std::runtime_error("Failed to create filter.");
     }
 
     if (!sensor_frame.empty()) {
@@ -211,11 +215,10 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
     // create an observation buffer
     _observation_buffers.push_back(boost::shared_ptr<buffer::MeasurementBuffer>(
         new buffer::MeasurementBuffer(
-            topic, observation_keep_time, expected_update_rate,
-            min_obstacle_height, max_obstacle_height, obstacle_range,
+            topic, observation_keep_time, expected_update_rate, obstacle_range,
             tf_buffer_, _global_frame, sensor_frame, transform_tolerance, min_z,
             max_z, vFOV, vFOVPadding, hFOV, decay_acceleration, marking,
-            clearing, _voxel_size, filter, voxel_min_points, enabled,
+            clearing, _voxel_size, std::move(filter), enabled,
             clear_after_reading, model_type)));
 
     // Add buffer to marking observation buffers

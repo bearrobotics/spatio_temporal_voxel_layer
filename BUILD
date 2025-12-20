@@ -3,6 +3,7 @@ load(
     "//build_rules/ros:defs.bzl",
     "cc_ros_dynamic_reconfigure",
     "cc_ros_interface",
+    "cc_ros_test",
     "ros_dynamic_reconfigure",
     "ros_interface",
     "ros_plugin",
@@ -44,12 +45,25 @@ cc_ros_dynamic_reconfigure(
     dep = ":spatio_temporal_voxel_layer_cfg",
 )
 
+ros_dynamic_reconfigure(
+    name = "noise_filter_cfg",
+    src = "cfg/NoiseFilter.cfg",
+    pkg_override = "spatio_temporal_voxel_layer",
+)
+
+cc_ros_dynamic_reconfigure(
+    name = "cc_noise_filter_cfg",
+    dep = ":noise_filter_cfg",
+)
+
 ros_plugin(
     name = "spatio_temporal_voxel_layer_plugin",
     srcs = [
+        "src/filter_factory.cpp",
         "src/frustum_models/depth_camera_frustum.cpp",
         "src/frustum_models/three_dimensional_lidar_frustum.cpp",
         "src/measurement_buffer.cpp",
+        "src/noise_filter.cpp",
         "src/spatio_temporal_voxel_grid.cpp",
         "src/spatio_temporal_voxel_layer.cpp",
         "src/vdb2pc.cpp",
@@ -62,6 +76,7 @@ ros_plugin(
     plugin_file = "costmap_plugins.xml",
     visibility = ["//ROS/external/navigation:__subpackages__"],
     deps = [
+        ":cc_noise_filter_cfg",
         ":cc_spatio_temporal_voxel_layer",
         ":cc_spatio_temporal_voxel_layer_cfg",
         "//ROS/bearlib",
@@ -78,5 +93,18 @@ ros_plugin(
         "@ros_comm_msgs//:cc_std_srvs",
         "@ros_geometry2//:tf2_geometry_msgs",
         "@ros_geometry2//:tf2_sensor_msgs",
+    ],
+)
+
+cc_ros_test(
+    name = "test_filter_factory",
+    size = "small",
+    srcs = ["test/test_filter_factory.cpp"],
+    launch_file = "test/test_filter_factory.test",
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        "//third_party/ros:roscpp",
+        "@gtests//:gtest",
+        "@perception_pcl//:pcl_conversions",
     ],
 )

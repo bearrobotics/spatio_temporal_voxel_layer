@@ -38,23 +38,24 @@
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <tf2_sensor_msgs/tf2_sensor_msgs.h>
 
+#include <memory>
 #include <spatio_temporal_voxel_layer/measurement_buffer.hpp>
 
+#include "spatio_temporal_voxel_layer/filter_interface.h"
 namespace buffer {
 
 /*****************************************************************************/
 MeasurementBuffer::MeasurementBuffer(
     const std::string& topic_name, const double& observation_keep_time,
-    const double& expected_update_rate, const double& min_obstacle_height,
-    const double& max_obstacle_height, const double& obstacle_range,
+    const double& expected_update_rate, const double& obstacle_range,
     tf2_ros::Buffer& tf, const std::string& global_frame,
     const std::string& sensor_frame, const double& tf_tolerance,
     const double& min_d, const double& max_d, const double& vFOV,
     const double& vFOVPadding, const double& hFOV,
     const double& decay_acceleration, const bool& marking, const bool& clearing,
-    const double& voxel_size, const Filters& filter,
-    const int& voxel_min_points, const bool& enabled,
-    const bool& clear_buffer_after_reading, const ModelType& model_type)
+    const double& voxel_size, std::unique_ptr<Filter> filter,
+    const bool& enabled, const bool& clear_buffer_after_reading,
+    const ModelType& model_type)
     : /*****************************************************************************/
       _buffer(tf),
       _observation_keep_time(observation_keep_time),
@@ -63,8 +64,6 @@ MeasurementBuffer::MeasurementBuffer(
       _global_frame(global_frame),
       _sensor_frame(sensor_frame),
       _topic_name(topic_name),
-      _min_obstacle_height(min_obstacle_height),
-      _max_obstacle_height(max_obstacle_height),
       _obstacle_range(obstacle_range),
       _tf_tolerance(tf_tolerance),
       _min_z(min_d),
@@ -76,11 +75,12 @@ MeasurementBuffer::MeasurementBuffer(
       _marking(marking),
       _clearing(clearing),
       _voxel_size(voxel_size),
-      _filter(filter),
-      _voxel_min_points(voxel_min_points),
+      _filter(std::move(filter)),
       _enabled(enabled),
       _clear_buffer_after_reading(clear_buffer_after_reading),
       _model_type(model_type) {}
+
+std::string MeasurementBuffer::GetTopic() const { return _topic_name; }
 
 /*****************************************************************************/
 MeasurementBuffer::~MeasurementBuffer(void)
@@ -133,6 +133,7 @@ void MeasurementBuffer::BufferROSCloud(const sensor_msgs::PointCloud2& cloud)
 
     if (_clearing && !_marking) {
       // no need to buffer points
+      // This seems wrong.
       return;
     }
 
@@ -145,33 +146,11 @@ void MeasurementBuffer::BufferROSCloud(const sensor_msgs::PointCloud2& cloud)
     pcl::PCLPointCloud2::Ptr cloud_pcl(new pcl::PCLPointCloud2());
     pcl::PCLPointCloud2::Ptr cloud_filtered(new pcl::PCLPointCloud2());
 
+    pcl_conversions::toPCL(*cld_global, *cloud_pcl);
     // remove points that are below or above our height restrictions, and
     // in the same time, remove NaNs and if user wants to use it, combine with a
-    if (_filter == Filters::VOXEL) {
-      pcl_conversions::toPCL(*cld_global, *cloud_pcl);
-      pcl::VoxelGrid<pcl::PCLPointCloud2> sor;
-      sor.setInputCloud(cloud_pcl);
-      sor.setFilterFieldName("z");
-      sor.setFilterLimits(_min_obstacle_height, _max_obstacle_height);
-      sor.setDownsampleAllData(false);
-      sor.setLeafSize((float)_voxel_size, (float)_voxel_size,
-                      (float)_voxel_size);
-      sor.setMinimumPointsNumberPerVoxel(
-          static_cast<unsigned int>(_voxel_min_points));
-      sor.filter(*cloud_filtered);
-      pcl_conversions::fromPCL(*cloud_filtered, *cld_global);
-    } else if (_filter == Filters::PASSTHROUGH) {
-      pcl_conversions::toPCL(*cld_global, *cloud_pcl);
-      pcl::PassThrough<pcl::PCLPointCloud2> pass_through_filter;
-      pass_through_filter.setInputCloud(cloud_pcl);
-      pass_through_filter.setKeepOrganized(false);
-      pass_through_filter.setFilterFieldName("z");
-      pass_through_filter.setFilterLimits(_min_obstacle_height,
-                                          _max_obstacle_height);
-      pass_through_filter.filter(*cloud_filtered);
-      pcl_conversions::fromPCL(*cloud_filtered, *cld_global);
-    }
-
+    _filter->ApplyFilter(cloud_pcl);
+    pcl_conversions::fromPCL(*cloud_pcl, *cld_global);
     _observation_list.front()._cloud = cld_global;
   } catch (tf::TransformException& ex) {
     // if fails, remove the empty observation

@@ -98,6 +98,8 @@ class Frustum {
   // set pose of depth camera in global space
   virtual void SetPosition(const geometry_msgs::Point& origin) = 0;
   virtual void SetOrientation(const geometry_msgs::Quaternion& quat) = 0;
+  virtual void GetVisualizationMarker(
+      visualization_msgs::MarkerArray& msg_list) = 0;
 
   // transform model to the current coordinates
   virtual void TransformModel(void) = 0;

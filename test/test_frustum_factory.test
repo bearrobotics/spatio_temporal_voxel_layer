@@ -1,0 +1,90 @@
+<launch>
+    <test test-name="test_frustum_factory" pkg="spatio_temporal_voxel_layer"
+        type="test_frustum_factory"
+        bazel="ROS/external/navigation/spatio_temporal_voxel_layer/test_frustum_factory_runner">
+        <rosparam command="load" ns="/frustum_factory_test">
+            <!-- Valid DepthCameraFrustum config -->
+            depth_camera_valid:
+                type: 3d_camera
+                vertical_fov_angle: 1.0
+                horizontal_fov_angle: 1.2
+                min_z: 0.1
+                max_z: 5.0
+
+            <!-- Missing type param -->
+            missing_type:
+                vertical_fov_angle: 1.0
+                horizontal_fov_angle: 1.2
+                min_z: 0.1
+                max_z: 5.0
+
+            <!-- Unknown type -->
+            unknown_type:
+                type: unknown_frustum_type
+                vertical_fov_angle: 1.0
+                horizontal_fov_angle: 1.2
+                min_z: 0.1
+                max_z: 5.0
+
+            <!-- Empty type -->
+            empty_type:
+                type: ""
+                vertical_fov_angle: 1.0
+                horizontal_fov_angle: 1.2
+                min_z: 0.1
+                max_z: 5.0
+
+            <!-- Missing vertical_fov_angle -->
+            missing_vertical_fov:
+                type: 3d_camera
+                horizontal_fov_angle: 1.2
+                min_z: 0.1
+                max_z: 5.0
+
+            <!-- Missing horizontal_fov_angle -->
+            missing_horizontal_fov:
+                type: 3d_camera
+                vertical_fov_angle: 1.0
+                min_z: 0.1
+                max_z: 5.0
+
+            <!-- Missing min_z -->
+            missing_min_z:
+                type: 3d_camera
+                vertical_fov_angle: 1.0
+                horizontal_fov_angle: 1.2
+                max_z: 5.0
+
+            <!-- Missing max_z -->
+            missing_max_z:
+                type: 3d_camera
+                vertical_fov_angle: 1.0
+                horizontal_fov_angle: 1.2
+                min_z: 0.1
+
+            <!-- Zero values (edge case) -->
+            zero_values:
+                type: 3d_camera
+                vertical_fov_angle: 0.0
+                horizontal_fov_angle: 0.0
+                min_z: 0.0
+                max_z: 0.0
+
+            <!-- Negative values (edge case) -->
+            negative_values:
+                type: 3d_camera
+                vertical_fov_angle: -1.0
+                horizontal_fov_angle: -1.2
+                min_z: -0.1
+                max_z: -5.0
+
+            <!-- min_z greater than max_z (edge case) -->
+            min_greater_than_max:
+                type: 3d_camera
+                vertical_fov_angle: 1.0
+                horizontal_fov_angle: 1.2
+                min_z: 10.0
+                max_z: 1.0
+        </rosparam>
+    </test>
+</launch>

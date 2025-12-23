@@ -75,20 +75,17 @@ typedef sensor_msgs::PointCloud2::Ptr point_cloud_ptr;
 // Measurement buffer
 class MeasurementBuffer {
  public:
-  using Filter = spatio_temporal_voxel_layer::Filter;
   MeasurementBuffer(const std::string& topic_name,
                     const double& observation_keep_time,
                     const double& expected_update_rate,
                     const double& obstacle_range, tf2_ros::Buffer& tf,
                     const std::string& global_frame,
                     const std::string& sensor_frame, const double& tf_tolerance,
-                    const double& min_d, const double& max_d,
-                    const double& vFOV, const double& vFOVPadding,
-                    const double& hFOV, const double& decay_acceleration,
-                    const bool& marking, const bool& clearing,
-                    const double& voxel_size, std::unique_ptr<Filter> filter,
+                    const double& decay_acceleration, const bool& marking,
+                    const bool& clearing, const double& voxel_size,
+                    std::unique_ptr<spatio_temporal_voxel_layer::Filter> filter,
                     const bool& enabled, const bool& clear_buffer_after_reading,
-                    const ModelType& model_type);
+                    FrustumFactoryFactory::FrustumFactory frustrum_factory);
   std::string GetTopic() const;
   ~MeasurementBuffer(void);
 
@@ -123,11 +120,10 @@ class MeasurementBuffer {
   std::string _global_frame, _topic_name, _sensor_frame;
   std::list<observation::MeasurementReading> _observation_list;
   double _obstacle_range, _tf_tolerance;
-  double _min_z, _max_z, _vertical_fov, _vertical_fov_padding, _horizontal_fov;
   double _decay_acceleration, _voxel_size;
   bool _marking, _clearing, _clear_buffer_after_reading, _enabled;
-  std::unique_ptr<Filter> _filter;
-  ModelType _model_type;
+  std::unique_ptr<spatio_temporal_voxel_layer::Filter> _filter;
+  FrustumFactoryFactory::FrustumFactory _frustrum_factory;
 };
 
 }  // namespace buffer

@@ -32,58 +32,24 @@
  *  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  *  POSSIBILITY OF SUCH DAMAGE.
  *
- * Author: Nicolas Varas (nicovaras@gmail.com)
- * Purpose: Structure for handling 3D Lidar FOVs to construct frustums
- *          and associated methods
  *********************************************************************/
 
-#ifndef THREE_DIMENSIONAL_LIDAR_FRUSTUM_H_
-#define THREE_DIMENSIONAL_LIDAR_FRUSTUM_H_
+#include "spatio_temporal_voxel_layer/frustum_factory.h"
 
-// STVL
-#include <spatio_temporal_voxel_layer/frustum_models/frustum.hpp>
-// M_PI
-#include <cmath>
+#include "bearlib/ros/param_loader.h"
+#include "spatio_temporal_voxel_layer/frustum_models/depth_camera_frustum.hpp"
 
-namespace geometry {
-
-// A class to model a spinning 3D Lidar frustum in world space
-class ThreeDimensionalLidarFrustum : public Frustum {
- public:
-  ThreeDimensionalLidarFrustum(const double& vFOV, const double& vFOVPadding,
-                               const double& hFOV, const double& min_dist,
-                               const double& max_dist);
-  virtual ~ThreeDimensionalLidarFrustum(void);
-
-  // Does nothing in 3D lidar model
-  virtual void TransformModel(void);
-
-  // determine if a point is inside of the transformed frustum
-  virtual bool IsInside(const openvdb::Vec3d& pt);
-
-  // set pose of 3d lidar in global space
-  virtual void SetPosition(const geometry_msgs::Point& origin);
-  virtual void SetOrientation(const geometry_msgs::Quaternion& quat);
-  virtual void GetVisualizationMarker(
-      visualization_msgs::MarkerArray& msg_list) override;
-
- private:
-  // utils to find useful frustum metadata
-  double Dot(const VectorWithPt3D&, const openvdb::Vec3d&) const;
-  double Dot(const VectorWithPt3D&, const Eigen::Vector3d&) const;
-
-  double _vFOV, _vFOVPadding, _hFOV, _min_d, _max_d;
-  double _hFOVhalf;
-  double _min_d_squared, _max_d_squared;
-  double _tan_vFOVhalf;
-  double _tan_vFOVhalf_squared;
-  Eigen::Vector3d _position;
-  Eigen::Quaterniond _orientation;
-  Eigen::Quaterniond _orientation_conjugate;
-  bool _valid_frustum;
-  bool _full_hFOV;
-};
-
-}  // namespace geometry
-
-#endif
+FrustumFactoryFactory::FrustumFactory
+FrustumFactoryFactory::CreateFrustumFactory(ros::NodeHandle& nh) {
+  auto frustum_type =
+      bear::lib::ros::LoadOptionalParam<std::string>(nh, "type");
+  if (!frustum_type.has_value()) {
+    ROS_FATAL("Frustum type parameter is empty");
+    return nullptr;
+  }
+  if (*frustum_type == "3d_camera") {
+    return CreateGenericFrustumFactory<geometry::DepthCameraFrustum>(nh);
+  }
+  ROS_ERROR_STREAM("Unknown frustum type: " << *frustum_type);
+  return nullptr;
+}

@@ -136,13 +136,14 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
   const std::string tf_prefix = tf::getPrefixParam(prefix_nh);
   std::stringstream ss(topics_string);
   std::string source;
+
+  std::vector<FrustumFactoryFactory::FrustumFactory> frustum_factories;
   while (ss >> source) {
     ros::NodeHandle source_node(nh, source);
 
     // get the parameters for the specific topic
     double observation_keep_time, expected_update_rate;
-    double min_z, max_z, vFOV, vFOVPadding;
-    double hFOV, decay_acceleration;
+    double decay_acceleration;
     std::string topic, sensor_frame, data_type, filter_str;
     bool inf_is_valid, clearing, marking, clear_after_reading, enabled;
 
@@ -161,19 +162,17 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
 
     clearing = bear::lib::ros::LoadRequiredParam<bool>(source_node, "clearing");
     marking = bear::lib::ros::LoadRequiredParam<bool>(source_node, "marking");
-    // minimum distance from camera it can see
-    min_z = bear::lib::ros::LoadRequiredParam<double>(source_node, "min_z");
-    // maximum distance from camera it can see
-    max_z = bear::lib::ros::LoadRequiredParam<double>(source_node, "max_z");
-    // vertical FOV angle in rad
-    vFOV = bear::lib::ros::LoadRequiredParam<double>(source_node,
-                                                     "vertical_fov_angle");
-    // vertical FOV padding in meters (3D lidar frustum only)
-    vFOVPadding = bear::lib::ros::LoadRequiredParam<double>(
-        source_node, "vertical_fov_padding");
-    // horizontal FOV angle in rad
-    hFOV = bear::lib::ros::LoadRequiredParam<double>(source_node,
-                                                     "horizontal_fov_angle");
+
+    ros::NodeHandle frustrum_nh(source_node, "frustrum");
+    auto frustrum_factory =
+        FrustumFactoryFactory::CreateFrustumFactory(frustrum_nh);
+    if (!frustrum_factory) {
+      ROS_FATAL("Failed to create frustum factory for source: %s",
+                source.c_str());
+      std::terminate();
+    }
+    frustum_factories.push_back(frustrum_factory);
+
     // acceleration scales the model's decay in presence of readings
     decay_acceleration = bear::lib::ros::LoadRequiredParam<double>(
         source_node, "decay_acceleration");
@@ -183,18 +182,13 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
         source_node, "clear_after_reading");
     // Whether the frustum is enabled on startup. Can be toggled with service
     enabled = bear::lib::ros::LoadRequiredParam<bool>(source_node, "enabled");
-    // model type - default depth camera frustum model
-    int model_type_int;
-    model_type_int =
-        bear::lib::ros::LoadRequiredParam<int>(source_node, "model_type");
-    ModelType model_type = static_cast<ModelType>(model_type_int);
 
     // Apply a PCL filter (Approximate VoxeGrid or PassThrough) or skip
     ros::NodeHandle filter_nh(source_node, "filter");
     std::unique_ptr<Filter> filter = FilterFactory::CreateFilter(filter_nh);
     if (!filter) {
       ROS_FATAL("Failed to create filter of type: %s", filter_str.c_str());
-      throw std::runtime_error("Failed to create filter.");
+      std::terminate();
     }
 
     if (!sensor_frame.empty()) {
@@ -216,10 +210,10 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
     _observation_buffers.push_back(boost::shared_ptr<buffer::MeasurementBuffer>(
         new buffer::MeasurementBuffer(
             topic, observation_keep_time, expected_update_rate, obstacle_range,
-            tf_buffer_, _global_frame, sensor_frame, transform_tolerance, min_z,
-            max_z, vFOV, vFOVPadding, hFOV, decay_acceleration, marking,
-            clearing, _voxel_size, std::move(filter), enabled,
-            clear_after_reading, model_type)));
+            tf_buffer_, _global_frame, sensor_frame, transform_tolerance,
+            decay_acceleration, marking, clearing, _voxel_size,
+            std::move(filter), enabled, clear_after_reading,
+            frustrum_factory)));
 
     // Add buffer to marking observation buffers
     if (marking == true) {

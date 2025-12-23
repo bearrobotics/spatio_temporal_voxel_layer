@@ -74,6 +74,12 @@ void ThreeDimensionalLidarFrustum::TransformModel(void)
   _valid_frustum = true;
 }
 
+void ThreeDimensionalLidarFrustum::GetVisualizationMarker(
+    visualization_msgs::MarkerArray& msg_list) {
+  ROS_ERROR(
+      "ThreeDimensionalLidarFrustum::GetVisualizationMarker not implemented");
+}
+
 /*****************************************************************************/
 bool ThreeDimensionalLidarFrustum::IsInside(const openvdb::Vec3d& pt)
 /*****************************************************************************/

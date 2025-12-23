@@ -37,26 +37,61 @@
 
 #include <spatio_temporal_voxel_layer/frustum_models/depth_camera_frustum.hpp>
 
+#include "bearlib/ros/param_loader.h"
+
 namespace geometry {
 
 /*****************************************************************************/
-DepthCameraFrustum::DepthCameraFrustum(const double& vFOV, const double& hFOV,
-                                       const double& min_dist,
-                                       const double& max_dist)
-    : _vFOV(vFOV),
-      _hFOV(hFOV),
-      _min_d(min_dist),
-      _max_d(max_dist)
+std::optional<DepthCameraFrustum::Config> DepthCameraFrustum::Config::Load(
+    ros::NodeHandle& nh)
+/*****************************************************************************/
+{
+  Config config;
+  auto vFOV =
+      bear::lib::ros::LoadOptionalParam<double>(nh, "vertical_fov_angle");
+  if (!vFOV.has_value()) {
+    ROS_ERROR(
+        "Failed to load vertical_fov_angle parameter for DepthCameraFrustum");
+    return std::nullopt;
+  }
+  config.vertical_fov_angle = vFOV.value();
+
+  auto hFOV =
+      bear::lib::ros::LoadOptionalParam<double>(nh, "horizontal_fov_angle");
+  if (!hFOV.has_value()) {
+    ROS_ERROR(
+        "Failed to load horizontal_fov_angle parameter for "
+        "DepthCameraFrustum");
+    return std::nullopt;
+  }
+  config.horizontal_fov_angle = hFOV.value();
+
+  auto min_z = bear::lib::ros::LoadOptionalParam<double>(nh, "min_z");
+  if (!min_z.has_value()) {
+    ROS_ERROR("Failed to load min_z parameter for DepthCameraFrustum");
+    return std::nullopt;
+  }
+  config.min_distance = min_z.value();
+
+  auto max_z = bear::lib::ros::LoadOptionalParam<double>(nh, "max_z");
+  if (!max_z.has_value()) {
+    ROS_ERROR("Failed to load max_z parameter for DepthCameraFrustum");
+    return std::nullopt;
+  }
+  config.max_distance = max_z.value();
+
+  return config;
+}
+
+/*****************************************************************************/
+DepthCameraFrustum::DepthCameraFrustum(Config config)
+    : _vFOV(config.vertical_fov_angle),
+      _hFOV(config.horizontal_fov_angle),
+      _min_d(config.min_distance),
+      _max_d(config.max_distance)
 /*****************************************************************************/
 {
   _valid_frustum = false;
-  ros::NodeHandle nh;
-#if VISUALIZE_FRUSTUM
-  _frustumPub = nh.advertise<visualization_msgs::MarkerArray>("/frustum", 1);
-  // give enough time for publisher to register, don't use in production.
-  ros::Duration(0.5).sleep();
-#endif
-
   this->ComputePlaneNormals();
 }
 
@@ -177,16 +212,17 @@ void DepthCameraFrustum::TransformModel(void)
   }
 
 #if VISUALIZE_FRUSTUM
-  visualization_msgs::MarkerArray msg_list;
   visualization_msgs::Marker msg;
+  msg_list_.markers.clear();
+  constexpr double kSize = 0.05;
   for (uint i = 0; i != _frustum_pts.size(); i++) {
     // frustum pts
     msg.header.frame_id = std::string("map");
     msg.type = visualization_msgs::Marker::SPHERE;
     msg.action = visualization_msgs::Marker::ADD;
-    msg.scale.x = 0.15;
-    msg.scale.y = 0.15;
-    msg.scale.z = 0.15;
+    msg.scale.x = kSize;
+    msg.scale.y = kSize;
+    msg.scale.z = kSize;
     msg.pose.orientation.w = 1.0;
     msg.header.stamp = ros::Time::now();
     msg.ns = "pt_" + std::to_string(i);
@@ -199,22 +235,22 @@ void DepthCameraFrustum::TransformModel(void)
     pnt.position.z = T_pt[2];
     pnt.orientation.w = 1;
     msg.pose = pnt;
-    msg_list.markers.push_back(msg);
+    msg_list_.markers.push_back(msg);
 
     // point numbers
     msg.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
     msg.ns = std::to_string(i);
     msg.pose.position.z += 0.15;
     msg.text = std::to_string(i);
-    msg_list.markers.push_back(msg);
+    msg_list_.markers.push_back(msg);
   }
 
   // frustum lines
   msg.header.frame_id = std::string("map");
   msg.type = visualization_msgs::Marker::LINE_STRIP;
-  msg.scale.x = 0.15;  /// ?
-  msg.scale.y = 0.15;  /// ?
-  msg.scale.z = 0.15;  /// ?
+  msg.scale.x = kSize;
+  msg.scale.y = kSize;
+  msg.scale.z = kSize;
   msg.pose.orientation.w = 1.0;
   msg.pose.position.x = 0;
   msg.pose.position.y = 0;
@@ -252,35 +288,17 @@ void DepthCameraFrustum::TransformModel(void)
       point.z = T_pt[2];
       msg.points.push_back(point);
     }
-    msg_list.markers.push_back(msg);
+    msg_list_.markers.push_back(msg);
   }
 
-  for (uint i = 0; i != _plane_normals.size(); i++) {
-    // normal vectors
-    msg.pose.position.z -= 0.15;
-    msg.type = visualization_msgs::Marker::ARROW;
-    msg.ns = "normal_" + std::to_string(i);
-    msg.scale.y = 0.07;
-    msg.scale.z = 0.07;
-    msg.scale.x = 1;
-    msg.color.g = 1.0f;
-    const VectorWithPt3D nml = _plane_normals.at(i);
-    msg.pose.position.x = nml.initial_point[0];
-    msg.pose.position.y = nml.initial_point[1];
-    msg.pose.position.z = nml.initial_point[2];
-
-    // turn unit vector into a quaternion
-    const Eigen::Quaterniond quat = Eigen::Quaterniond::FromTwoVectors(
-        Eigen::Vector3d::UnitX(), Eigen::Vector3d(nml.x, nml.y, nml.z));
-    msg.pose.orientation.x = quat.x();
-    msg.pose.orientation.y = quat.y();
-    msg.pose.orientation.z = quat.z();
-    msg.pose.orientation.w = quat.w();
-
-    msg_list.markers.push_back(msg);
-  }
-  _frustumPub.publish(msg_list);
 #endif
+}
+
+void DepthCameraFrustum::GetVisualizationMarker(
+    visualization_msgs::MarkerArray& msg_list) {
+  for (auto marker : msg_list_.markers) {
+    msg_list.markers.push_back(marker);
+  }
 }
 
 /*****************************************************************************/

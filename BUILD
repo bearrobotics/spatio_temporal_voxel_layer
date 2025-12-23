@@ -61,6 +61,7 @@ ros_plugin(
     srcs = [
         "src/dynamic_obstacle_tracker.cpp",
         "src/filter_factory.cpp",
+        "src/frustum_factory.cpp",
         "src/frustum_models/depth_camera_frustum.cpp",
         "src/frustum_models/footprint_frustum.cpp",
         "src/frustum_models/three_dimensional_lidar_frustum.cpp",
@@ -158,5 +159,17 @@ cc_ros_test(
         "@eigen",
         "@gtests//:gtest",
         "@openvdb",
+    ],
+)
+
+cc_ros_test(
+    name = "test_frustum_factory",
+    size = "small",
+    srcs = ["test/test_frustum_factory.cpp"],
+    launch_file = "test/test_frustum_factory.test",
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        "//third_party/ros:roscpp",
+        "@gtests//:gtest",
     ],
 )

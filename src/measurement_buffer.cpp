@@ -50,12 +50,11 @@ MeasurementBuffer::MeasurementBuffer(
     const double& expected_update_rate, const double& obstacle_range,
     tf2_ros::Buffer& tf, const std::string& global_frame,
     const std::string& sensor_frame, const double& tf_tolerance,
-    const double& min_d, const double& max_d, const double& vFOV,
-    const double& vFOVPadding, const double& hFOV,
     const double& decay_acceleration, const bool& marking, const bool& clearing,
-    const double& voxel_size, std::unique_ptr<Filter> filter,
+    const double& voxel_size,
+    std::unique_ptr<spatio_temporal_voxel_layer::Filter> filter,
     const bool& enabled, const bool& clear_buffer_after_reading,
-    const ModelType& model_type)
+    FrustumFactoryFactory::FrustumFactory frustrum_factory)
     : /*****************************************************************************/
       _buffer(tf),
       _observation_keep_time(observation_keep_time),
@@ -66,11 +65,6 @@ MeasurementBuffer::MeasurementBuffer(
       _topic_name(topic_name),
       _obstacle_range(obstacle_range),
       _tf_tolerance(tf_tolerance),
-      _min_z(min_d),
-      _max_z(max_d),
-      _vertical_fov(vFOV),
-      _vertical_fov_padding(vFOVPadding),
-      _horizontal_fov(hFOV),
       _decay_acceleration(decay_acceleration),
       _marking(marking),
       _clearing(clearing),
@@ -78,8 +72,7 @@ MeasurementBuffer::MeasurementBuffer(
       _filter(std::move(filter)),
       _enabled(enabled),
       _clear_buffer_after_reading(clear_buffer_after_reading),
-      _model_type(model_type) {}
-
+      _frustrum_factory(frustrum_factory) {}
 std::string MeasurementBuffer::GetTopic() const { return _topic_name; }
 
 /*****************************************************************************/
@@ -99,7 +92,7 @@ void MeasurementBuffer::BufferROSCloud(const sensor_msgs::PointCloud2& cloud)
 
   try {
     // transform into global frame
-    geometry_msgs::PoseStamped local_pose, global_pose;
+    geometry_msgs::PoseStamped local_pose;
     local_pose.pose.position.x = 0;
     local_pose.pose.position.y = 0;
     local_pose.pose.position.z = 0;
@@ -110,6 +103,7 @@ void MeasurementBuffer::BufferROSCloud(const sensor_msgs::PointCloud2& cloud)
     local_pose.header.stamp = cloud.header.stamp;
     local_pose.header.frame_id = origin_frame;
 
+    geometry_msgs::PoseStamped global_pose;
     _buffer.canTransform(_global_frame, local_pose.header.frame_id,
                          local_pose.header.stamp, ros::Duration(0.5));
     _buffer.transform(local_pose, global_pose, _global_frame);
@@ -120,20 +114,13 @@ void MeasurementBuffer::BufferROSCloud(const sensor_msgs::PointCloud2& cloud)
 
     _observation_list.front()._orientation = global_pose.pose.orientation;
     _observation_list.front()._obstacle_range_in_m = _obstacle_range;
-    _observation_list.front()._min_z_in_m = _min_z;
-    _observation_list.front()._max_z_in_m = _max_z;
-    _observation_list.front()._vertical_fov_in_rad = _vertical_fov;
-    _observation_list.front()._vertical_fov_padding_in_m =
-        _vertical_fov_padding;
-    _observation_list.front()._horizontal_fov_in_rad = _horizontal_fov;
     _observation_list.front()._decay_acceleration = _decay_acceleration;
     _observation_list.front()._clearing = _clearing;
     _observation_list.front()._marking = _marking;
-    _observation_list.front()._model_type = _model_type;
+    _observation_list.front()._frustrum_factory = _frustrum_factory;
 
     if (_clearing && !_marking) {
       // no need to buffer points
-      // This seems wrong.
       return;
     }
 

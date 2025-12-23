@@ -40,19 +40,41 @@
 #ifndef DEPTH_FRUSTUM_H_
 #define DEPTH_FRUSTUM_H_
 
+#include <optional>
 // STVL
 #include <spatio_temporal_voxel_layer/frustum_models/frustum.hpp>
 
 namespace geometry {
 
 // visualize the frustum should someone other than me care
-#define VISUALIZE_FRUSTUM 0
+#define VISUALIZE_FRUSTUM true
 
 // A class to model a depth sensor frustum in world space
 class DepthCameraFrustum : public Frustum {
  public:
-  DepthCameraFrustum(const double& vFOV, const double& hFOV,
-                     const double& min_dist, const double& max_dist);
+  struct Config {
+    /**
+     * @brief Loads DepthCameraFrustum configuration from ROS parameters.
+     *
+     * Required parameters:
+     * - vertical_fov_angle (double): Vertical field of view in radians.
+     * - horizontal_fov_angle (double): Horizontal field of view in radians.
+     * - min_z (double): Minimum sensing distance.
+     * - max_z (double): Maximum sensing distance.
+     *
+     * @param nh ROS NodeHandle with frustum parameters.
+     * @return Config if all parameters loaded successfully, std::nullopt
+     *         otherwise.
+     */
+    static std::optional<Config> Load(ros::NodeHandle& nh);
+
+    double vertical_fov_angle = 0.0;
+    double horizontal_fov_angle = 0.0;
+    double min_distance = 0.0;
+    double max_distance = 0.0;
+  };
+
+  DepthCameraFrustum(Config config);
   virtual ~DepthCameraFrustum(void);
 
   // transform plane normals by depth camera pose
@@ -64,6 +86,8 @@ class DepthCameraFrustum : public Frustum {
   // set pose of depth camera in global space
   virtual void SetPosition(const geometry_msgs::Point& origin);
   virtual void SetOrientation(const geometry_msgs::Quaternion& quat);
+  void GetVisualizationMarker(
+      visualization_msgs::MarkerArray& msg_list) override;
 
  private:
   // utils to find useful frustum metadata
@@ -79,7 +103,7 @@ class DepthCameraFrustum : public Frustum {
 
 #if VISUALIZE_FRUSTUM
   std::vector<Eigen::Vector3d> _frustum_pts;
-  ros::Publisher _frustumPub;
+  visualization_msgs::MarkerArray msg_list_;
 #endif
 };
 

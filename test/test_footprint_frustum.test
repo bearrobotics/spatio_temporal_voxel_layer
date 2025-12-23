@@ -1,0 +1,21 @@
+<launch>
+    <test test-name="test_footprint_frustum" pkg="spatio_temporal_voxel_layer"
+        type="test_footprint_frustum"
+        bazel="ROS/external/navigation/spatio_temporal_voxel_layer/test_footprint_frustum_runner">
+        <rosparam command="load" ns="/footprint_frustum">
+            valid:
+                enable: true
+                point1: [1.0, 0.0]
+                point2: [0.0, 1.0]
+                point3: [-1.0, 0.0]
+                point4: [0.0, -1.0]
+            disabled:
+                enable: false
+                point1: [1.0, 0.0]
+                point2: [0.0, 1.0]
+                point3: [-1.0, 0.0]
+            empty_footprint:
+                enable: true
+        </rosparam>
+    </test>
+</launch>

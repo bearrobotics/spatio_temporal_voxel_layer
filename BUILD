@@ -61,6 +61,7 @@ ros_plugin(
     srcs = [
         "src/filter_factory.cpp",
         "src/frustum_models/depth_camera_frustum.cpp",
+        "src/frustum_models/footprint_frustum.cpp",
         "src/frustum_models/three_dimensional_lidar_frustum.cpp",
         "src/measurement_buffer.cpp",
         "src/noise_filter.cpp",
@@ -106,5 +107,16 @@ cc_ros_test(
         "//third_party/ros:roscpp",
         "@gtests//:gtest",
         "@perception_pcl//:pcl_conversions",
+    ],
+)
+
+cc_ros_test(
+    name = "test_footprint_frustum",
+    size = "small",
+    srcs = ["test/test_footprint_frustum.cpp"],
+    launch_file = "test/test_footprint_frustum.test",
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        "@gtests//:gtest",
     ],
 )

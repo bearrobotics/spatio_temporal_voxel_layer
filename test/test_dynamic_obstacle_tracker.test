@@ -1,0 +1,31 @@
+<launch>
+    <test test-name="test_dynamic_obstacle_tracker" pkg="spatio_temporal_voxel_layer"
+        type="test_dynamic_obstacle_tracker"
+        bazel="ROS/external/navigation/spatio_temporal_voxel_layer/test_dynamic_obstacle_tracker_runner">
+        <rosparam command="load" ns="/dynamic_obstacle_tracker">
+            valid:
+                enable: true
+                activation_velocity_threshold: 0.5
+                min_distance_between_readings_threshold: 0.1
+                interpolation_in_future: 0.5
+                interpolation_in_past: 0.5
+                stale_time_threshold: 2.0
+                inflation_radius_factor: 1.5
+                number_of_interpolation_circles: 5
+                past_time_window: 1.0
+                random_walk_probability_limit: 0.5
+                seconds_since_last_random_walk: 0.0
+                publish_visualization: false
+            invalid_missing_enable:
+                activation_velocity_threshold: 0.5
+                min_distance_between_readings_threshold: 0.1
+                interpolation_in_future: 0.5
+                interpolation_in_past: 0.5
+                stale_time_threshold: 2.0
+                inflation_radius_factor: 1.5
+                number_of_interpolation_circles: 5
+                past_time_window: 1.0
+            empty: {}
+        </rosparam>
+    </test>
+</launch>

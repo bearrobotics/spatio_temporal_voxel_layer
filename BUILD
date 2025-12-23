@@ -59,6 +59,7 @@ cc_ros_dynamic_reconfigure(
 ros_plugin(
     name = "spatio_temporal_voxel_layer_plugin",
     srcs = [
+        "src/dynamic_obstacle_tracker.cpp",
         "src/filter_factory.cpp",
         "src/frustum_models/depth_camera_frustum.cpp",
         "src/frustum_models/footprint_frustum.cpp",
@@ -83,6 +84,7 @@ ros_plugin(
         "//ROS/bearlib",
         "//ROS/external/navigation/costmap_2d",
         "//ROS/external/perception_pcl/pcl_ros:pcl_ros_tf",
+        "//ROS/pennybot_perception/obstacle_detector:cc_obstacle_detector_msgs",
         "//third_party/pcl:common",
         "//third_party/pcl:filters",
         "//third_party/ros:cc_sensor_msgs",
@@ -118,5 +120,43 @@ cc_ros_test(
     deps = [
         ":spatio_temporal_voxel_layer_plugin",
         "@gtests//:gtest",
+    ],
+)
+
+cc_ros_test(
+    name = "test_dynamic_obstacle_tracker",
+    size = "small",
+    srcs = ["test/test_dynamic_obstacle_tracker.cpp"],
+    launch_file = "test/test_dynamic_obstacle_tracker.test",
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        "//third_party/ros:roscpp",
+        "@eigen",
+        "@gtests//:gtest",
+        "@openvdb",
+    ],
+)
+
+cc_ros_test(
+    name = "test_circle_frustum",
+    size = "small",
+    srcs = ["test/test_circle_frustum.cpp"],
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        "@eigen",
+        "@gtests//:gtest",
+        "@openvdb",
+    ],
+)
+
+cc_ros_test(
+    name = "test_polygon_frustum",
+    size = "small",
+    srcs = ["test/test_polygon_frustum.cpp"],
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        "@eigen",
+        "@gtests//:gtest",
+        "@openvdb",
     ],
 )

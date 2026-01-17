@@ -1,0 +1,13 @@
+# Service to check if a given point is in the voxel grid blind spot
+# Request
+geometry_msgs/PointStamped point # Query point in any coordinate frame
+float64 tolerance  # XY tolerance centered around the point to check (meters)
+float64 min_height # Minimum height of voxels to consider (meters)
+float64 max_height # Maximum height of voxels to consider (meters)
+---
+# Response
+bool success                     # True if the service call was successful
+bool is_blind_spot                # True if point is in a blind spot
+geometry_msgs/PointStamped  closest_point  # Closest point on the voxel grid to the query pose
+string msg
+

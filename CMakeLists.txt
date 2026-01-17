@@ -32,6 +32,7 @@ find_package(catkin REQUIRED
 add_service_files(
   DIRECTORY srv
   FILES SaveGrid.srv
+  CheckBlindSpot.srv
 )
 
 generate_messages(

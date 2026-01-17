@@ -65,6 +65,7 @@ struct MeasurementReading {
                      FrustumFactoryFactory::FrustumFactory frustrum_factory)
       : /*****************************************************************************/
         _origin(origin),
+        _sensor_name(sensor_name),
         _cloud(new sensor_msgs::PointCloud2(cloud)),
         _obstacle_range_in_m(obstacle_range),
         _decay_acceleration(decay_acceleration),
@@ -82,6 +83,7 @@ struct MeasurementReading {
   MeasurementReading(const MeasurementReading& obs)
       : /*****************************************************************************/
         _origin(obs._origin),
+        _sensor_name(obs._sensor_name),
         _cloud(new sensor_msgs::PointCloud2(*(obs._cloud))),
         _obstacle_range_in_m(obs._obstacle_range_in_m),
         _marking(obs._marking),
@@ -91,6 +93,7 @@ struct MeasurementReading {
         _frustrum_factory(obs._frustrum_factory) {}
 
   geometry_msgs::Point _origin;
+  std::string _sensor_name;
   geometry_msgs::Quaternion _orientation;
   sensor_msgs::PointCloud2::Ptr _cloud;
   double _obstacle_range_in_m;

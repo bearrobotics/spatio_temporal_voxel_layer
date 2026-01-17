@@ -133,6 +133,7 @@ void SpatioTemporalVoxelGrid::ClearFrustums(
     frustum->TransformModel();
 
     obs_frustums.emplace_back(frustum, it->_decay_acceleration);
+    UpdateLastReadings(*it);
   }
   TemporalClearAndGenerateCostmap(obs_frustums, cleared_cells);
   return;
@@ -213,6 +214,47 @@ void SpatioTemporalVoxelGrid::TemporalClearAndGenerateCostmap(
 
   // free memory taken by expired voxels
   _grid->pruneGrid();
+}
+
+bool SpatioTemporalVoxelGrid::IsPointInLastSensorFrustums(
+    const openvdb::Vec3d& pose) const {
+  for (const LastReading& reading : last_readings_) {
+    if (reading.frustum->IsInside(pose)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::optional<openvdb::Vec3d> SpatioTemporalVoxelGrid::CheckBox(
+    const openvdb::Vec3d& min_corner, const openvdb::Vec3d& max_corner) const {
+  // 3. Convert World BBox to Index BBox
+  // This function handles the complex transformation, including non-uniform
+  // scale/rotation. We use worldToIndexCellCentered to ensure the resulting
+  // CoordBBox covers all relevant *voxel centers* inside the world space box.
+  auto transform = _grid->transform();
+
+  openvdb::Coord index_min = transform.worldToIndexCellCentered(min_corner);
+  openvdb::Coord index_max = transform.worldToIndexCellCentered(max_corner);
+  openvdb::CoordBBox index_bbox(index_min, index_max);
+
+  // 4. Iterate over Active Voxels in the Index BBox
+
+  // The iterator is constrained by the calculated index_bbox
+  for (openvdb::DoubleGrid::ValueOnCIter iter = _grid->cbeginValueOn(); iter;
+       ++iter) {
+    if (!index_bbox.isInside(iter.getCoord())) {
+      continue;
+    }
+    // Convert the index back to world space for output
+    openvdb::Vec3d active_voxel_in_box =
+        transform.indexToWorld(iter.getCoord());
+    if (IsPointInLastSensorFrustums(active_voxel_in_box)) {
+      continue;
+    }
+    return active_voxel_in_box;
+  }
+  return std::nullopt;
 }
 
 /*****************************************************************************/
@@ -447,6 +489,36 @@ openvdb::Vec3d SpatioTemporalVoxelGrid::IndexToWorld(
   pose_world[2] += center_offset;
 
   return pose_world;
+}
+
+void SpatioTemporalVoxelGrid::UpdateLastReadings(
+    const observation::MeasurementReading& reading) {
+  // First iterate thorough last readings to see if this sensor already has a
+  // reading (uses sensor name)
+  for (auto& last_reading : last_readings_) {
+    if (last_reading.sensor_name != reading._sensor_name) {
+      continue;
+    }
+    if (last_reading.time >= reading._cloud->header.stamp) {
+      return;
+    }
+    // If found, update it if the time is newer
+    last_reading.time = reading._cloud->header.stamp;
+    last_reading.frustum = reading._frustrum_factory();
+    last_reading.frustum->SetPosition(reading._origin);
+    last_reading.frustum->SetOrientation(reading._orientation);
+    last_reading.frustum->TransformModel();
+    return;
+  }
+
+  // If not found, add it to the list
+  last_readings_.push_back(LastReading{.time = reading._cloud->header.stamp,
+                                       .sensor_name = reading._sensor_name,
+                                       .frustum = reading._frustrum_factory()});
+  last_readings_.back().frustum->SetPosition(reading._origin);
+  last_readings_.back().frustum->SetOrientation(reading._orientation);
+  last_readings_.back().frustum->TransformModel();
+  return;
 }
 
 /*****************************************************************************/

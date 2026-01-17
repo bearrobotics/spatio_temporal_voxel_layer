@@ -94,6 +94,7 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
   // clear under robot footprint
   _update_footprint_enabled =
       bear::lib::ros::LoadRequiredParam<bool>(nh, "update_footprint_enabled");
+
   // keep tabs on unknown space
   bool track_unknown_space =
       bear::lib::ros::LoadOptionalParam<bool>(nh, "track_unknown_space")
@@ -123,6 +124,8 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
   }
 
   _voxel_pub = nh.advertise<sensor_msgs::PointCloud2>("voxel_grid", 1);
+  _blind_spot_pub =
+      nh.advertise<visualization_msgs::Marker>("blind_spot_point", 1);
   _grid_saver =
       nh.advertiseService("spatiotemporal_voxel_grid/save_grid",
                           &SpatioTemporalVoxelLayer::SaveGridCallback, this);
@@ -132,6 +135,9 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
       _publish_voxels);
   matchSize();
   current_ = true;
+  _blind_spot_checker = nh.advertiseService(
+      "check_blind_spot", &SpatioTemporalVoxelLayer::CheckBlindSpotCallback,
+      this);
 
   const std::string tf_prefix = tf::getPrefixParam(prefix_nh);
   std::stringstream ss(topics_string);
@@ -749,6 +755,111 @@ bool SpatioTemporalVoxelLayer::SaveGridCallback(
   ROS_WARN("SpatioTemporalVoxelGrid: Failed to save grid.");
   resp.status = false;
   return false;
+}
+
+void SpatioTemporalVoxelLayer::PublishBlindSpotPoint(
+    const std::optional<openvdb::Vec3d>& world_coord) {
+  visualization_msgs::Marker blind_spot_point;
+  blind_spot_point.header.frame_id = _global_frame;
+  blind_spot_point.header.stamp = ros::Time::now();
+  blind_spot_point.ns = "blind_spot_point";
+  blind_spot_point.id = 0;
+  blind_spot_point.type = visualization_msgs::Marker::SPHERE;
+  blind_spot_point.scale.x = 0.2;
+  blind_spot_point.scale.y = 0.2;
+  blind_spot_point.scale.z = 0.2;
+  blind_spot_point.color.a = 1.0;
+  blind_spot_point.color.r = 1.0;
+  blind_spot_point.color.g = 0.0;
+  blind_spot_point.color.b = 1.0;
+  if (world_coord) {
+    blind_spot_point.action = visualization_msgs::Marker::ADD;
+    blind_spot_point.pose.position.x = world_coord->x();
+    blind_spot_point.pose.position.y = world_coord->y();
+    blind_spot_point.pose.position.z = world_coord->z();
+  } else {
+    blind_spot_point.action = visualization_msgs::Marker::DELETE;
+  }
+  _blind_spot_pub.publish(blind_spot_point);
+}
+
+/*****************************************************************************/
+bool SpatioTemporalVoxelLayer::CheckBlindSpotCallback(
+    spatio_temporal_voxel_layer::CheckBlindSpot::Request& req,
+    spatio_temporal_voxel_layer::CheckBlindSpot::Response& resp)
+/*****************************************************************************/
+{
+  if (req.point.header.frame_id.empty()) {
+    ROS_ERROR("CheckBlindSpot: Request point is missing a frame_id.");
+    resp.success = false;
+    resp.msg = "no_frame_id";
+    return true;
+  }
+  if (req.tolerance < 0.0) {
+    ROS_ERROR("CheckBlindSpot: Request tolerance is negative.");
+    resp.success = false;
+    resp.msg = "negative_tolerance";
+    return true;
+  }
+  if (req.tolerance > 5.0) {
+    ROS_ERROR("CheckBlindSpot: Request tolerance is unreasonably large.");
+    resp.success = false;
+    resp.msg = "unreasonable_tolerance";
+    return true;
+  }
+  if (req.min_height < 0.0) {
+    ROS_ERROR("CheckBlindSpot: Request min_height is negative.");
+    resp.success = false;
+    resp.msg = "negative_min_height";
+    return true;
+  }
+  if (req.max_height < req.min_height) {
+    ROS_ERROR("CheckBlindSpot: Request max_height is less than min_height.");
+    resp.success = false;
+    resp.msg = "max_height_less_than_min_height";
+    return true;
+  }
+
+  geometry_msgs::PointStamped global_point;
+  try {
+    tf_buffer_.transform(req.point, global_point, _global_frame,
+                         ros::Duration(0.5));
+  } catch (tf2::TransformException& ex) {
+    ROS_ERROR("CheckBlindSpot: Failed to transform pose to global frame: %s",
+              ex.what());
+    resp.success = false;
+    resp.msg = "transform_failed";
+    return true;
+  }
+
+  // Extract XY position from the query
+  const double query_x = global_point.point.x;
+  const double query_y = global_point.point.y;
+
+  // 2. Define the World-Space Query Region (BBox)
+  openvdb::Vec3d min_world_corner(query_x - req.tolerance,
+                                  query_y - req.tolerance, req.min_height);
+  openvdb::Vec3d max_world_corner(query_x + req.tolerance,
+                                  query_y + req.tolerance, req.max_height);
+
+  boost::recursive_mutex::scoped_lock lock(_voxel_grid_lock);
+  std::optional<openvdb::Vec3d> blind_spot_point =
+      _voxel_grid->CheckBox(min_world_corner, max_world_corner);
+  PublishBlindSpotPoint(blind_spot_point);
+  if (!blind_spot_point) {
+    resp.success = true;
+    resp.is_blind_spot = false;
+    resp.msg = "no_occupied_voxel";
+    return true;
+  }
+  resp.success = true;
+  resp.closest_point.point.x = blind_spot_point->x();
+  resp.closest_point.point.y = blind_spot_point->y();
+  resp.closest_point.point.z = blind_spot_point->z();
+  resp.closest_point.header.frame_id = _global_frame;
+  resp.is_blind_spot = true;
+  resp.msg = "occupied_voxel";
+  return true;
 }
 
 };  // namespace spatio_temporal_voxel_layer

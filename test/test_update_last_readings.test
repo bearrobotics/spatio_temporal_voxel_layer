@@ -1,0 +1,14 @@
+<launch>
+    <test test-name="test_update_last_readings" pkg="spatio_temporal_voxel_layer"
+        type="test_update_last_readings"
+        bazel="ROS/external/navigation/spatio_temporal_voxel_layer/test_update_last_readings_runner">
+        <rosparam command="load" ns="/update_readings_test">
+            frustum:
+                type: 3d_camera
+                vertical_fov_angle: 1.0
+                horizontal_fov_angle: 1.2
+                min_z: 0.1
+                max_z: 5.0
+        </rosparam>
+    </test>
+</launch>

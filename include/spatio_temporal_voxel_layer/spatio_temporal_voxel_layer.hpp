@@ -67,6 +67,7 @@
 #include <sensor_msgs/LaserScan.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <sensor_msgs/point_cloud_conversion.h>
+#include <spatio_temporal_voxel_layer/CheckBlindSpot.h>
 #include <spatio_temporal_voxel_layer/SaveGrid.h>
 #include <std_srvs/SetBool.h>
 // projector
@@ -78,7 +79,6 @@
 #include "tf2_geometry_msgs/tf2_geometry_msgs.h"
 #include "tf2_ros/message_filter.h"
 #include "tf2_ros/transform_listener.h"
-
 namespace spatio_temporal_voxel_layer {
 
 // conveniences for line lengths
@@ -152,12 +152,38 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
   void DynamicReconfigureCallback(dynamicReconfigureType& config,
                                   uint32_t level);
 
+  /**
+   * @brief ROS service callback to check if a point is in a blind spot.
+   * @details A blind spot is defined as a location with an occupied voxel that
+   * is not currently visible by any sensor frustum. The service transforms the
+   * query point to the global frame and searches for occupied voxels within the
+   * specified tolerance and height range.
+   * @param req Service request containing the query point, tolerance, and
+   *            height bounds.
+   * @param resp Service response indicating success, whether a blind spot was
+   *             found, and the closest occupied point if applicable.
+   * @return Always returns true (ROS service convention).
+   */
+  bool CheckBlindSpotCallback(
+      spatio_temporal_voxel_layer::CheckBlindSpot::Request& req,
+      spatio_temporal_voxel_layer::CheckBlindSpot::Response& resp);
+
   // Enable/Disable callback
   bool BufferEnablerCallback(
       std_srvs::SetBool::Request& request,
       std_srvs::SetBool::Response& response,
       boost::shared_ptr<buffer::MeasurementBuffer>& buffer,
       boost::shared_ptr<message_filters::SubscriberBase>& subcriber);
+
+  /**
+   * @brief Publishes a visualization marker for a detected blind spot point.
+   * @details Publishes a sphere marker at the blind spot location for RViz
+   * visualization. If no blind spot is provided, publishes a DELETE action to
+   * remove any existing marker.
+   * @param world_coord The world coordinates of the blind spot, or nullopt to
+   *                    clear the marker.
+   */
+  void PublishBlindSpotPoint(const std::optional<openvdb::Vec3d>& world_coord);
 
   laser_geometry::LaserProjection _laser_projector;
   std::vector<boost::shared_ptr<message_filters::SubscriberBase> >
@@ -175,7 +201,9 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
 
   bool _publish_voxels, _mapping_mode;
   ros::Publisher _voxel_pub;
+  ros::Publisher _blind_spot_pub;
   ros::ServiceServer _grid_saver;
+  ros::ServiceServer _blind_spot_checker;
   ros::Duration _map_save_duration;
   ros::Time _last_map_save_time;
   std::string _global_frame;

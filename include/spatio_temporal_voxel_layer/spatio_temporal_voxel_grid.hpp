@@ -132,6 +132,39 @@ class SpatioTemporalVoxelGrid {
   // Save the file to file with size information
   bool SaveGrid(const std::string& file_name, double& map_size_bytes);
 
+  /**
+   * @brief Updates the stored sensor frustum for a given sensor.
+   * @details Maintains a list of the most recent sensor readings (frustums) for
+   * each sensor. If the sensor already has a stored reading, it updates only if
+   * the new reading is more recent. Otherwise, adds a new entry.
+   * @param reading The measurement reading containing sensor name, timestamp,
+   *                origin, orientation, and frustum factory.
+   */
+  void UpdateLastReadings(const observation::MeasurementReading& reading);
+
+  /**
+   * @brief Checks if a point is visible within any stored sensor frustum.
+   * @details Iterates through all stored sensor frustums and returns true if
+   * the point falls inside any of them. Used to determine if an occupied voxel
+   * is currently observable or in a blind spot.
+   * @param point The 3D point in world coordinates to check.
+   * @return True if the point is inside at least one sensor frustum.
+   */
+  bool IsPointInLastSensorFrustums(const openvdb::Vec3d& point) const;
+
+  /**
+   * @brief Finds an occupied voxel in a region that is not visible to sensors.
+   * @details Searches for active (occupied) voxels within the specified
+   * axis-aligned bounding box in world coordinates. Returns the first voxel
+   * found that is not inside any current sensor frustum (i.e., a blind spot).
+   * @param min_corner Minimum corner of the search box in world coordinates.
+   * @param max_corner Maximum corner of the search box in world coordinates.
+   * @return World coordinates of an occupied blind spot voxel, or nullopt if
+   *         no blind spot exists in the region.
+   */
+  std::optional<openvdb::Vec3d> CheckBox(
+      const openvdb::Vec3d& min_corner, const openvdb::Vec3d& max_corner) const;
+
  protected:
   // Initialize grid metadata and library
   void InitializeGrid(void);
@@ -157,6 +190,13 @@ class SpatioTemporalVoxelGrid {
   // Utilities for tranformation
   openvdb::Vec3d WorldToIndex(const openvdb::Vec3d& coord) const;
   openvdb::Vec3d IndexToWorld(const openvdb::Coord& coord) const;
+
+  struct LastReading {
+    ros::Time time;
+    std::string sensor_name;
+    std::unique_ptr<geometry::Frustum> frustum;
+  };
+  std::vector<LastReading> last_readings_;
 
   mutable openvdb::DoubleGrid::Ptr _grid;
   int _decay_model;

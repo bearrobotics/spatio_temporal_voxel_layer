@@ -90,6 +90,8 @@ void MeasurementBuffer::BufferROSCloud(const sensor_msgs::PointCloud2& cloud)
   const std::string origin_frame =
       _sensor_frame == "" ? cloud.header.frame_id : _sensor_frame;
 
+  _observation_list.front()._sensor_name = origin_frame;
+
   try {
     // transform into global frame
     geometry_msgs::PoseStamped local_pose;

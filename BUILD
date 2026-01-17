@@ -24,13 +24,16 @@ ros_interface(
         "action/*",
     ]),
     deps = [
+        "//third_party/ros:geometry_msgs",
         "//third_party/ros:std_msgs",
     ],
 )
 
 cc_ros_interface(
     name = "cc_spatio_temporal_voxel_layer",
-    visibility = [],
+    visibility = [
+        "//ROS/external/navigation:__subpackages__",
+    ],
     deps = [":spatio_temporal_voxel_layer"],
 )
 
@@ -171,5 +174,71 @@ cc_ros_test(
         ":spatio_temporal_voxel_layer_plugin",
         "//third_party/ros:roscpp",
         "@gtests//:gtest",
+    ],
+)
+
+cc_ros_test(
+    name = "test_update_last_readings",
+    size = "small",
+    srcs = ["test/test_update_last_readings.cpp"],
+    launch_file = "test/test_update_last_readings.test",
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        "//third_party/ros:roscpp",
+        "@gtests//:gtest",
+        "@openvdb",
+    ],
+)
+
+cc_ros_test(
+    name = "test_is_point_in_frustums",
+    size = "small",
+    srcs = ["test/test_is_point_in_frustums.cpp"],
+    launch_file = "test/test_is_point_in_frustums.test",
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        "//third_party/ros:roscpp",
+        "@gtests//:gtest",
+        "@openvdb",
+    ],
+)
+
+cc_ros_test(
+    name = "test_check_box",
+    size = "small",
+    srcs = ["test/test_check_box.cpp"],
+    launch_file = "test/test_check_box.test",
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        "//third_party/ros:roscpp",
+        "@gtests//:gtest",
+        "@openvdb",
+    ],
+)
+
+cc_ros_test(
+    name = "test_blind_spot_integration",
+    size = "small",
+    srcs = ["test/test_blind_spot_integration.cpp"],
+    launch_file = "test/test_blind_spot_integration.test",
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        "//third_party/ros:roscpp",
+        "@gtests//:gtest",
+        "@openvdb",
+    ],
+)
+
+cc_ros_test(
+    name = "test_check_blind_spot_service",
+    size = "small",
+    srcs = ["test/test_check_blind_spot_service.cpp"],
+    launch_file = "test/test_check_blind_spot_service.test",
+    deps = [
+        ":cc_spatio_temporal_voxel_layer",
+        ":spatio_temporal_voxel_layer_plugin",
+        "//third_party/ros:roscpp",
+        "@gtests//:gtest",
+        "@openvdb",
     ],
 )

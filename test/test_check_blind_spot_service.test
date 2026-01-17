@@ -1,0 +1,17 @@
+<launch>
+    <!-- Frustum parameters for test grid (used by test's internal grid) -->
+    <rosparam command="load" ns="/test_check_blind_spot_service">
+        frustum:
+            type: 3d_camera
+            vertical_fov_angle: 1.0
+            horizontal_fov_angle: 1.2
+            min_z: 0.1
+            max_z: 5.0
+    </rosparam>
+
+    <!-- The actual test -->
+    <test test-name="test_check_blind_spot_service" pkg="spatio_temporal_voxel_layer"
+          type="test_check_blind_spot_service"
+          bazel="ROS/external/navigation/spatio_temporal_voxel_layer/test_check_blind_spot_service_runner"
+          time-limit="60" />
+</launch>

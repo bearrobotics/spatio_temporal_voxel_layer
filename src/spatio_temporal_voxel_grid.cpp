@@ -35,23 +35,29 @@
  * Author: Steve Macenski (steven.macenski@simberobotics.com)
  *********************************************************************/
 
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+
 #include <spatio_temporal_voxel_layer/spatio_temporal_voxel_grid.hpp>
 
 namespace volume_grid {
 
 /*****************************************************************************/
-SpatioTemporalVoxelGrid::SpatioTemporalVoxelGrid(const float& voxel_size,
-                                                 const double& background_value,
-                                                 const int& decay_model,
-                                                 const double& voxel_decay,
-                                                 const bool& pub_voxels)
+SpatioTemporalVoxelGrid::SpatioTemporalVoxelGrid(
+    const float& voxel_size, const double& background_value,
+    const int& decay_model, const double& voxel_decay, const bool& pub_voxels,
+    std::unique_ptr<geometry::FootprintFrustum> safety_zone_frustum,
+    std::unique_ptr<DynamicObstacleTracker> dynamic_obstacle_tracker)
     : _background_value(background_value),
       _voxel_size(voxel_size),
       _decay_model(decay_model),
       _voxel_decay(voxel_decay),
       _pub_voxels(pub_voxels),
+      _safety_zone_frustum(std::move(safety_zone_frustum)),
+      _dynamic_obstacle_tracker(std::move(dynamic_obstacle_tracker)),
       _grid_points(new std::vector<geometry_msgs::Point32>),
-      _cost_map(new std::unordered_map<occupany_cell, uint>)
+      _cost_map(new std::unordered_map<occupany_cell, uint>),
+      _nh()
 /*****************************************************************************/
 {
   this->InitializeGrid();
@@ -93,13 +99,22 @@ void SpatioTemporalVoxelGrid::InitializeGrid(void)
   _grid->insertMeta("Voxel Size", openvdb::FloatMetadata(_voxel_size));
   _grid->setGridClass(openvdb::GRID_LEVEL_SET);
 
+  _frustum_viz_pub = _nh.advertise<visualization_msgs::MarkerArray>(
+      "/spatio_temporal_voxel_layer/frustums", 1);
   return;
+}
+
+void SpatioTemporalVoxelGrid::SetRobotPose(double x, double y, double yaw) {
+  _robot_x = x;
+  _robot_y = y;
+  _robot_yaw = yaw;
 }
 
 /*****************************************************************************/
 void SpatioTemporalVoxelGrid::ClearFrustums(
     const std::vector<observation::MeasurementReading>& clearing_readings,
-    std::unordered_set<occupany_cell>& cleared_cells)
+    std::unordered_set<occupany_cell>& cleared_cells,
+    std::vector<DynamicObstacleReading>& dynamic_obstacle_readings)
 /*****************************************************************************/
 {
   boost::unique_lock<boost::mutex> lock(_grid_lock);
@@ -115,12 +130,22 @@ void SpatioTemporalVoxelGrid::ClearFrustums(
   _cost_map->clear();
 
   std::vector<frustum_model> obs_frustums;
-
+  std::vector<std::unique_ptr<geometry::IClearingFrustum>>
+      dynamic_obstacle_frusturms;
+  dynamic_obstacle_frusturms =
+      _dynamic_obstacle_tracker->GenerateDynamicObstacleClearingFrustums(
+          dynamic_obstacle_readings);
+  if (dynamic_obstacle_frusturms.size() > 0) {
+    ROS_WARN_THROTTLE(10, "Number of circles: %d",
+                      dynamic_obstacle_frusturms.size());
+  }
   if (clearing_readings.size() == 0) {
-    TemporalClearAndGenerateCostmap(obs_frustums, cleared_cells);
+    TemporalClearAndGenerateCostmap(obs_frustums, cleared_cells,
+                                    dynamic_obstacle_frusturms);
     return;
   }
 
+  _frustum_markers.markers.clear();
   obs_frustums.reserve(clearing_readings.size());
 
   std::vector<observation::MeasurementReading>::const_iterator it =
@@ -132,17 +157,75 @@ void SpatioTemporalVoxelGrid::ClearFrustums(
     frustum->SetOrientation(it->_orientation);
     frustum->TransformModel();
 
+    visualization_msgs::MarkerArray frustum_marker;
+    frustum->GetVisualizationMarker(frustum_marker);
+    AddVisualizationMarker(it->_sensor_name, frustum_marker);
     obs_frustums.emplace_back(frustum, it->_decay_acceleration);
     UpdateLastReadings(*it);
   }
-  TemporalClearAndGenerateCostmap(obs_frustums, cleared_cells);
+  if (!_frustum_markers.markers.empty()) {
+    _frustum_viz_pub.publish(_frustum_markers);
+  }
+  // We need to get the robot's current position and orientation for the safety
+  // zone
+  geometry_msgs::Point robot_position;
+  robot_position.x = _robot_x;
+  robot_position.y = _robot_y;
+  robot_position.z = 0.0;
+  tf2::Quaternion q;
+  // roll=0, pitch=0, yaw=yaw
+  q.setRPY(0, 0, _robot_yaw);
+  geometry_msgs::Quaternion robot_orientation = tf2::toMsg(q);
+  _safety_zone_frustum->SetPosition(robot_position);
+  _safety_zone_frustum->SetOrientation(robot_orientation);
+  _safety_zone_frustum->TransformModel();
+  _safety_zone_frustum->PublishVisualization();
+  TemporalClearAndGenerateCostmap(obs_frustums, cleared_cells,
+                                  dynamic_obstacle_frusturms);
   return;
+}
+
+void SpatioTemporalVoxelGrid::AddVisualizationMarker(
+    const std::string& sensor_name,
+    const visualization_msgs::MarkerArray& frustum_marker) {
+  std_msgs::ColorRGBA color;
+  if (sensor_name.find("astra_depth_optical_frame") != std::string::npos) {
+    color.r = 0.0f;
+    color.g = 0.0f;
+    color.b = 1.0f;
+    color.a = 0.5f;
+  } else if (sensor_name.find("astra_down_depth_optical_frame") !=
+             std::string::npos) {
+    color.r = 0.0f;
+    color.g = 1.0f;
+    color.b = 0.0f;
+    color.a = 0.5f;
+  } else if (sensor_name.find("astra_up_depth_optical_frame") !=
+             std::string::npos) {
+    color.r = 1.0f;
+    color.g = 0.0f;
+    color.b = 0.0f;
+    color.a = 0.5f;
+  } else {
+    color.r = 1.0f;
+    color.g = 0.0f;
+    color.b = 1.0f;
+    color.a = 0.5f;
+  }
+  for (const auto& marker : frustum_marker.markers) {
+    visualization_msgs::Marker mod_marker = marker;
+    mod_marker.ns = sensor_name + "_" + marker.ns;
+    mod_marker.color = color;
+    _frustum_markers.markers.push_back(mod_marker);
+  }
 }
 
 /*****************************************************************************/
 void SpatioTemporalVoxelGrid::TemporalClearAndGenerateCostmap(
     std::vector<frustum_model>& frustums,
-    std::unordered_set<occupany_cell>& cleared_cells)
+    std::unordered_set<occupany_cell>& cleared_cells,
+    std::vector<std::unique_ptr<geometry::IClearingFrustum>>&
+        dynamic_obstacle_frusturms)
 /*****************************************************************************/
 {
   // sample time once for all clearing readings
@@ -179,27 +262,46 @@ void SpatioTemporalVoxelGrid::TemporalClearAndGenerateCostmap(
           // expired by acceleration
           cleared_point = true;
           if (!this->ClearGridPoint(pt_index)) {
-            std::cout << "Failed to clear point." << std::endl;
+            ROS_WARN("Failed to clear point.");
           }
           break;
         } else {
           const double updated_mark =
               cit_grid.getValue() - frustum_acceleration;
           if (!this->MarkGridPoint(pt_index, updated_mark)) {
-            std::cout << "Failed to update mark." << std::endl;
+            ROS_WARN("Failed to update mark.");
           }
           break;
         }
       }
     }
 
+    // Check if the point is in a dynamic obstacle clearing frustum
+    for (const std::unique_ptr<geometry::IClearingFrustum>& frustum :
+         dynamic_obstacle_frusturms) {
+      if (frustum->IsInside(pose_world)) {
+        ROS_WARN_THROTTLE(10, "CLEARED DYNAMIC POINT:Point: [%f, %f, %f]",
+                          pose_world[0], pose_world[1], pose_world[2]);
+        frustum_cycle = true;
+        cleared_point = true;
+        if (!this->ClearGridPoint(pt_index)) {
+          ROS_WARN("Failed to clear point.");
+        }
+        break;
+      }
+    }
+
     // if not inside any, check against nominal decay model
     if (!frustum_cycle) {
-      if (base_duration_to_decay < 0.) {
+      if (IsObstacleInSensorDeadZone(pose_world)) {
+        ROS_WARN_THROTTLE(5.,
+                          "Obstacle in sensor dead zone. Point: [%f, %f, %f]",
+                          pose_world[0], pose_world[1], pose_world[2]);
+      } else if (base_duration_to_decay < 0.) {
         // expired by temporal clearing
         cleared_point = true;
         if (!this->ClearGridPoint(pt_index)) {
-          std::cout << "Failed to clear point." << std::endl;
+          ROS_WARN("Failed to clear point.");
         }
       }
     }
@@ -214,6 +316,33 @@ void SpatioTemporalVoxelGrid::TemporalClearAndGenerateCostmap(
 
   // free memory taken by expired voxels
   _grid->pruneGrid();
+}
+
+/*****************************************************************************/
+std::vector<openvdb::Vec3d> SpatioTemporalVoxelGrid::GetVoxelsAtXY(
+    double x, double y, double tolerance) const
+/*****************************************************************************/
+{
+  double squared_tolerance = tolerance * tolerance;
+  std::vector<openvdb::Vec3d> voxels_at_xy;
+
+  // Iterate over all active voxels in the grid
+  openvdb::DoubleGrid::ValueOnCIter cit_grid = _grid->cbeginValueOn();
+  for (; cit_grid.test(); ++cit_grid) {
+    const openvdb::Coord pt_index(cit_grid.getCoord());
+    const openvdb::Vec3d voxel_world = this->IndexToWorld(pt_index);
+
+    // Check if this voxel is at the query XY location (within tolerance)
+    const double dx = voxel_world.x() - x;
+    const double dy = voxel_world.y() - y;
+    const double squared_xy_dist = dx * dx + dy * dy;
+
+    if (squared_xy_dist <= squared_tolerance) {
+      voxels_at_xy.push_back(voxel_world);
+    }
+  }
+
+  return voxels_at_xy;
 }
 
 bool SpatioTemporalVoxelGrid::IsPointInLastSensorFrustums(
@@ -332,7 +461,7 @@ void SpatioTemporalVoxelGrid::operator()(
       if (!this->MarkGridPoint(
               openvdb::Coord(mark_grid[0], mark_grid[1], mark_grid[2]),
               cur_time)) {
-        std::cout << "Failed to mark point." << std::endl;
+        ROS_WARN("Failed to mark point.");
       }
     }
   }
@@ -421,7 +550,7 @@ bool SpatioTemporalVoxelGrid::ResetGrid(void)
       return true;
     }
   } catch (...) {
-    std::cout << "Failed to reset costmap, please try again." << std::endl;
+    ROS_WARN("Failed to reset costmap, please try again.");
   }
   return false;
 }
@@ -536,6 +665,17 @@ bool SpatioTemporalVoxelGrid::IsGridEmpty(void) const
 {
   // Returns grid's population status
   return _grid->empty();
+}
+
+/*****************************************************************************/
+bool SpatioTemporalVoxelGrid::IsObstacleInSensorDeadZone(
+    const openvdb::Vec3d& point) const
+/*****************************************************************************/
+{
+  if (!_safety_zone_frustum) {
+    return false;
+  }
+  return _safety_zone_frustum->IsInside(point);
 }
 
 /*****************************************************************************/

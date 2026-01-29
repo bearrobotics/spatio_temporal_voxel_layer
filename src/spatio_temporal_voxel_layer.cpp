@@ -39,6 +39,7 @@
 
 #include "bearlib/ros/param_loader.h"
 #include "spatio_temporal_voxel_layer/filter_factory.h"
+#include "spatio_temporal_voxel_layer/spatio_temporal_voxel_layer.hpp"
 
 namespace spatio_temporal_voxel_layer {
 
@@ -94,6 +95,10 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
   // clear under robot footprint
   _update_footprint_enabled =
       bear::lib::ros::LoadRequiredParam<bool>(nh, "update_footprint_enabled");
+  // whether reset() function of the costmap interface is enabled. This is
+  // helpful for now to remember obstacles in between destinations. Eventually
+  // we need to make this smarter.
+  _reset_enabled = bear::lib::ros::LoadRequiredParam<bool>(nh, "reset_enabled");
 
   // keep tabs on unknown space
   bool track_unknown_space =
@@ -111,6 +116,33 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
   double map_save_time =
       bear::lib::ros::LoadOptionalParam<double>(nh, "map_save_duration")
           .value_or(60.0);
+
+  ros::NodeHandle safety_zone_nh(nh, "safety_zone");
+  auto safety_zone_config =
+      geometry::FootprintFrustum::Config::Load(safety_zone_nh);
+  if (!safety_zone_config) {
+    ROS_FATAL("Failed to load safety zone footprint frustum configuration.");
+    std::terminate();
+  }
+  auto safety_zone_frustum =
+      geometry::FootprintFrustum::Create(*safety_zone_config, safety_zone_nh);
+  if (!safety_zone_frustum) {
+    ROS_FATAL("Failed to create safety zone footprint frustum.");
+    std::terminate();
+  }
+  ros::NodeHandle dynamic_obstacle_clearing_nh(nh, "dynamic_obstacle_clearing");
+  auto config =
+      DynamicObstacleTracker::Config::LoadConfig(dynamic_obstacle_clearing_nh);
+  if (!config) {
+    ROS_FATAL("Failed to load dynamic obstacle tracker configuration.");
+    std::terminate();
+  }
+  auto dynamic_obstacle_tracker =
+      DynamicObstacleTracker::Create(*config, dynamic_obstacle_clearing_nh);
+  if (!dynamic_obstacle_tracker) {
+    ROS_FATAL("Failed to create dynamic obstacle tracker.");
+    std::terminate();
+  }
 
   if (_mapping_mode) {
     _map_save_duration = ros::Duration(map_save_time);
@@ -132,7 +164,8 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
 
   _voxel_grid = new volume_grid::SpatioTemporalVoxelGrid(
       _voxel_size, (double)getDefaultValue(), _decay_model, _voxel_decay,
-      _publish_voxels);
+      _publish_voxels, std::move(safety_zone_frustum),
+      std::move(dynamic_obstacle_tracker));
   matchSize();
   current_ = true;
   _blind_spot_checker = nh.advertiseService(
@@ -298,14 +331,69 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
     }
   }
 
+  // Setup dynamic obstacle tracker
+  auto sub = boost::make_shared<
+      message_filters::Subscriber<obstacle_detector::Obstacles>>(
+      g_nh, "/obstacle_detector/obstacles", 50);
+  _observation_subscribers.push_back(sub);
+  auto filter =
+      boost::make_shared<tf2_ros::MessageFilter<obstacle_detector::Obstacles>>(
+          *sub, tf_buffer_, _global_frame, 50, g_nh);
+  filter->registerCallback(
+      boost::bind(&SpatioTemporalVoxelLayer::ObstaclesCallback, this, _1));
+  _observation_notifiers.push_back(filter);
+
   // Dynamic reconfigure
-  dynamic_reconfigure::Server<dynamicReconfigureType>::CallbackType f;
-  f = boost::bind(&SpatioTemporalVoxelLayer::DynamicReconfigureCallback, this,
-                  _1, _2);
-  _dynamic_reconfigure_server = new dynamicReconfigureServerType(nh);
-  _dynamic_reconfigure_server->setCallback(f);
+  // TODO: @benenati RN-1794 Update dynamic reconfigure to work with new changes
+  // dynamic_reconfigure::Server<dynamicReconfigureType>::CallbackType f;
+  // f = boost::bind(&SpatioTemporalVoxelLayer::DynamicReconfigureCallback,
+  // this,
+  //                 _1, _2);
+  // _dynamic_reconfigure_server = new dynamicReconfigureServerType(nh);
+  // _dynamic_reconfigure_server->setCallback(f);
 
   ROS_INFO("%s initialization complete!", getName().c_str());
+}
+
+void SpatioTemporalVoxelLayer::ObstaclesCallback(
+    const obstacle_detector::ObstaclesConstPtr& msg) {
+  // Technically we need to convert the locations to the correct frame but
+  // they're already in "map"
+  std::scoped_lock lock(_dynamic_obstacle_lock);
+  for (const auto& cluster : msg->clusters) {
+    DynamicObstacleReading& reading = _dynamic_obstacle_readings.emplace_back();
+    reading.tracker_id_ = cluster.tracker_id;
+    reading.center_[0] = cluster.center.x;
+    reading.center_[1] = cluster.center.y;
+    reading.radius_ = cluster.radius;
+    reading.velocity_[0] = cluster.velocity.x;
+    reading.velocity_[1] = cluster.velocity.y;
+    reading.time_ = cluster.header.stamp;
+
+    // Generate extended polygons for the dynamic obstacle
+    for (const auto& polygon : cluster.extended_polygons) {
+      DynamicObstacleReading::Polygon& extended_polygon =
+          reading.extended_polygons_.emplace_back();
+      for (const geometry_msgs::Point32& point : polygon.points) {
+        extended_polygon.outer().emplace_back(point.x, point.y);
+      }
+    }
+  }
+}
+
+bool SpatioTemporalVoxelLayer::GetDynamicObstacleReadings(
+    std::vector<DynamicObstacleReading>& dynamic_obstacle_readings)
+/*****************************************************************************/
+{
+  // get dynamic obstacle readings
+  bool current = true;
+  ROS_WARN_THROTTLE(10, "Getting dynamic obstacle readings: Size: %i",
+                    _dynamic_obstacle_readings.size());
+
+  std::scoped_lock lock(_dynamic_obstacle_lock);
+  dynamic_obstacle_readings = _dynamic_obstacle_readings;
+  _dynamic_obstacle_readings.clear();
+  return current;
 }
 
 /*****************************************************************************/
@@ -489,7 +577,6 @@ void SpatioTemporalVoxelLayer::activate(void)
   for (sub_it; sub_it != _observation_subscribers.end(); ++sub_it) {
     (*sub_it)->subscribe();
   }
-
   observation_buffers_iter buf_it = _observation_buffers.begin();
   for (buf_it; buf_it != _observation_buffers.end(); ++buf_it) {
     (*buf_it)->ResetLastUpdatedTime();
@@ -502,7 +589,6 @@ void SpatioTemporalVoxelLayer::deactivate(void)
 {
   // unsubscribe from all sensor sources
   ROS_INFO("%s was deactivated.", getName().c_str());
-
   observation_subscribers_iter sub_it = _observation_subscribers.begin();
   for (sub_it; sub_it != _observation_subscribers.end(); ++sub_it) {
     if (*sub_it != NULL) {
@@ -515,6 +601,13 @@ void SpatioTemporalVoxelLayer::deactivate(void)
 void SpatioTemporalVoxelLayer::reset(void)
 /*****************************************************************************/
 {
+  if (!_reset_enabled) {
+    return;
+  }
+  ResetLayer();
+}
+
+void SpatioTemporalVoxelLayer::ResetLayer() {
   boost::recursive_mutex::scoped_lock lock(_voxel_grid_lock);
   // reset layer
   Costmap2D::resetMaps();
@@ -564,32 +657,35 @@ void SpatioTemporalVoxelLayer::DynamicReconfigureCallback(
     SpatioTemporalVoxelLayerConfig& config, uint32_t level)
 /*****************************************************************************/
 {
-  boost::recursive_mutex::scoped_lock lock(_voxel_grid_lock);
+  // TODO: @benenati Update dynamic reconfigure to work with new changes.
+  // Currently
+  //  this is disabled to be able to ship MVP.
+  //  boost::recursive_mutex::scoped_lock lock(_voxel_grid_lock);
 
-  _enabled = config.enabled;
-  _combination_method = config.combination_method;
-  _mark_threshold = config.mark_threshold;
-  _update_footprint_enabled = config.update_footprint_enabled;
-  _mapping_mode = config.mapping_mode;
-  _map_save_duration = ros::Duration(config.map_save_duration);
+  // _enabled = config.enabled;
+  // _combination_method = config.combination_method;
+  // _mark_threshold = config.mark_threshold;
+  // _update_footprint_enabled = config.update_footprint_enabled;
+  // _mapping_mode = config.mapping_mode;
+  // _map_save_duration = ros::Duration(config.map_save_duration);
 
-  if (level >= 1)  // update grid
-  {
-    auto default_value = (config.track_unknown_space)
-                             ? costmap_2d::NO_INFORMATION
-                             : costmap_2d::FREE_SPACE;
-    setDefaultValue(default_value);
-    _voxel_size = config.voxel_size;
-    _voxel_decay = config.voxel_decay;
-    _decay_model =
-        static_cast<volume_grid::GlobalDecayModel>(config.decay_model);
-    _publish_voxels = config.publish_voxel_map;
+  // if (level >= 1)  // update grid
+  // {
+  //   auto default_value = (config.track_unknown_space)
+  //                            ? costmap_2d::NO_INFORMATION
+  //                            : costmap_2d::FREE_SPACE;
+  //   setDefaultValue(default_value);
+  //   _voxel_size = config.voxel_size;
+  //   _voxel_decay = config.voxel_decay;
+  //   _decay_model =
+  //       static_cast<volume_grid::GlobalDecayModel>(config.decay_model);
+  //   _publish_voxels = config.publish_voxel_map;
 
-    delete _voxel_grid;
-    _voxel_grid = new volume_grid::SpatioTemporalVoxelGrid(
-        _voxel_size, static_cast<double>(getDefaultValue()), _decay_model,
-        _voxel_decay, _publish_voxels);
-  }
+  //   delete _voxel_grid;
+  //   _voxel_grid = new volume_grid::SpatioTemporalVoxelGrid(
+  //       _voxel_size, static_cast<double>(getDefaultValue()), _decay_model,
+  //       _voxel_decay, _publish_voxels, nullptr, nullptr);
+  // }
 }
 
 /*****************************************************************************/
@@ -685,12 +781,15 @@ void SpatioTemporalVoxelLayer::updateBounds(float robot_x, float robot_y,
   }
 
   useExtraBounds(min_x, min_y, max_x, max_y);
+  _voxel_grid->SetRobotPose(robot_x, robot_y, robot_yaw);
 
   bool current = true;
   std::vector<observation::MeasurementReading> marking_observations,
       clearing_observations;
+  std::vector<DynamicObstacleReading> dynamic_obstacle_readings;
   current = GetMarkingObservations(marking_observations) && current;
   current = GetClearingObservations(clearing_observations) && current;
+  current = GetDynamicObstacleReadings(dynamic_obstacle_readings) && current;
   ObservationsResetAfterReading();
   current_ = current;
 
@@ -698,7 +797,8 @@ void SpatioTemporalVoxelLayer::updateBounds(float robot_x, float robot_y,
 
   // navigation mode: clear observations, mapping mode: save maps and publish
   if (!_mapping_mode) {
-    _voxel_grid->ClearFrustums(clearing_observations, cleared_cells);
+    _voxel_grid->ClearFrustums(clearing_observations, cleared_cells,
+                               dynamic_obstacle_readings);
   } else if (ros::Time::now() - _last_map_save_time > _map_save_duration) {
     _last_map_save_time = ros::Time::now();
     time_t rawtime;
@@ -764,21 +864,22 @@ void SpatioTemporalVoxelLayer::PublishBlindSpotPoint(
   blind_spot_point.header.stamp = ros::Time::now();
   blind_spot_point.ns = "blind_spot_point";
   blind_spot_point.id = 0;
-  blind_spot_point.type = visualization_msgs::Marker::SPHERE;
-  blind_spot_point.scale.x = 0.2;
-  blind_spot_point.scale.y = 0.2;
-  blind_spot_point.scale.z = 0.2;
-  blind_spot_point.color.a = 1.0;
-  blind_spot_point.color.r = 1.0;
-  blind_spot_point.color.g = 0.0;
-  blind_spot_point.color.b = 1.0;
-  if (world_coord) {
+
+  if (!world_coord) {
+    blind_spot_point.action = visualization_msgs::Marker::DELETE;
+  } else {
+    blind_spot_point.type = visualization_msgs::Marker::SPHERE;
     blind_spot_point.action = visualization_msgs::Marker::ADD;
     blind_spot_point.pose.position.x = world_coord->x();
     blind_spot_point.pose.position.y = world_coord->y();
     blind_spot_point.pose.position.z = world_coord->z();
-  } else {
-    blind_spot_point.action = visualization_msgs::Marker::DELETE;
+    blind_spot_point.scale.x = 0.2;
+    blind_spot_point.scale.y = 0.2;
+    blind_spot_point.scale.z = 0.2;
+    blind_spot_point.color.a = 1.0;
+    blind_spot_point.color.r = 1.0;
+    blind_spot_point.color.g = 0.0;
+    blind_spot_point.color.b = 1.0;
   }
   _blind_spot_pub.publish(blind_spot_point);
 }

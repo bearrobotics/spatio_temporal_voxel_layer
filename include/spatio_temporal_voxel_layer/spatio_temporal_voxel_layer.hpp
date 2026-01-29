@@ -75,7 +75,12 @@
 // tf
 #include <tf2/buffer_core.h>
 
+#include <mutex>
+
 #include "message_filters/subscriber.h"
+#include "obstacle_detector/Obstacles.h"
+#include "spatio_temporal_voxel_layer/dynamic_obstacle_reading.hpp"
+#include "spatio_temporal_voxel_layer/frustum_models/footprint_frustum.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.h"
 #include "tf2_ros/message_filter.h"
 #include "tf2_ros/transform_listener.h"
@@ -120,13 +125,43 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
       std::vector<observation::MeasurementReading>& marking_observations) const;
   void ObservationsResetAfterReading() const;
 
+  /**
+   * @brief Retrieves dynamic obstacle readings from the buffer.
+   * @details Extracts all buffered dynamic obstacle readings and clears the
+   * internal buffer. Thread-safe operation using a mutex lock.
+   * @param[out] dynamic_obstacle_readings Vector to populate with current
+   *                                       dynamic obstacle readings.
+   * @return Always returns true to indicate readings were successfully
+   *         retrieved.
+   */
+  bool GetDynamicObstacleReadings(
+      std::vector<DynamicObstacleReading>& dynamic_obstacle_readings);
+
   // Functions to interact with maps
   void UpdateROSCostmap(
       float* min_x, float* min_y, float* max_x, float* max_y,
       std::unordered_set<volume_grid::occupany_cell>& cleared_cells);
   bool updateFootprint(float robot_x, float robot_y, float robot_yaw,
                        float* min_x, float* min_y, float* max_x, float* max_y);
+
+  /**
+   * @brief Resets the underlying OpenVDB voxel grid.
+   * @details Clears the level set in the spatio-temporal voxel grid, removing
+   * all stored voxel data. Logs a warning if the reset operation fails.
+   */
   void ResetGrid(void);
+
+  /**
+   * @brief Resets the entire costmap layer including grid and observations.
+   * @details Performs a complete reset of the layer by:
+   * - Acquiring the voxel grid lock to ensure thread safety
+   * - Resetting the costmap 2D maps
+   * - Clearing the voxel grid via ResetGrid()
+   * - Marking the layer as current
+   * - Resetting the last updated time for all observation buffers
+   * This function is called by reset() when reset is enabled.
+   */
+  void ResetLayer();
 
   // Saving grids callback for openVDB
   bool SaveGridCallback(spatio_temporal_voxel_layer::SaveGrid::Request& req,
@@ -143,6 +178,16 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
   void PointCloud2Callback(
       const sensor_msgs::PointCloud2ConstPtr& message,
       const boost::shared_ptr<buffer::MeasurementBuffer>& buffer);
+
+  /**
+   * @brief Callback for processing dynamic obstacles from obstacle_detector.
+   * @details Receives obstacle clusters and buffers them as dynamic obstacle
+   * readings. Extracts cluster properties including tracker ID, center,
+   * radius, velocity, and extended polygons. Thread-safe operation using a
+   * mutex lock.
+   * @param msg Obstacle message containing detected dynamic obstacle clusters.
+   */
+  void ObstaclesCallback(const obstacle_detector::ObstaclesConstPtr& msg);
 
   // Functions for adding static obstacle zones
   bool AddStaticObservations(const observation::MeasurementReading& obs);
@@ -210,11 +255,13 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
   double _voxel_size, _voxel_decay;
   int _combination_method, _mark_threshold;
   volume_grid::GlobalDecayModel _decay_model;
-  bool _update_footprint_enabled, _enabled;
+  bool _update_footprint_enabled, _enabled, _reset_enabled;
   std::vector<geometry_msgs::Point> _transformed_footprint;
   std::vector<observation::MeasurementReading> _static_observations;
   volume_grid::SpatioTemporalVoxelGrid* _voxel_grid;
   boost::recursive_mutex _voxel_grid_lock;
+  std::vector<DynamicObstacleReading> _dynamic_obstacle_readings;
+  std::mutex _dynamic_obstacle_lock;
 };
 
 };  // namespace spatio_temporal_voxel_layer

@@ -103,6 +103,22 @@ ros_plugin(
     ],
 )
 
+cc_library(
+    name = "test_utils",
+    testonly = True,
+    srcs = ["test/test_utils.cpp"],
+    hdrs = ["test/test_utils.h"],
+    includes = ["."],
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        "//third_party/ros:cc_geometry_msgs",
+        "//third_party/ros:cc_sensor_msgs",
+        "//third_party/ros:cc_sensor_msgs_lib",
+        "//third_party/ros:roscpp",
+        "@openvdb",
+    ],
+)
+
 cc_ros_test(
     name = "test_filter_factory",
     size = "small",
@@ -184,6 +200,7 @@ cc_ros_test(
     launch_file = "test/test_update_last_readings.test",
     deps = [
         ":spatio_temporal_voxel_layer_plugin",
+        ":test_utils",
         "//third_party/ros:roscpp",
         "@gtests//:gtest",
         "@openvdb",
@@ -197,6 +214,7 @@ cc_ros_test(
     launch_file = "test/test_is_point_in_frustums.test",
     deps = [
         ":spatio_temporal_voxel_layer_plugin",
+        ":test_utils",
         "//third_party/ros:roscpp",
         "@gtests//:gtest",
         "@openvdb",
@@ -210,6 +228,7 @@ cc_ros_test(
     launch_file = "test/test_check_box.test",
     deps = [
         ":spatio_temporal_voxel_layer_plugin",
+        ":test_utils",
         "//third_party/ros:roscpp",
         "@gtests//:gtest",
         "@openvdb",
@@ -223,6 +242,7 @@ cc_ros_test(
     launch_file = "test/test_blind_spot_integration.test",
     deps = [
         ":spatio_temporal_voxel_layer_plugin",
+        ":test_utils",
         "//third_party/ros:roscpp",
         "@gtests//:gtest",
         "@openvdb",
@@ -237,6 +257,7 @@ cc_ros_test(
     deps = [
         ":cc_spatio_temporal_voxel_layer",
         ":spatio_temporal_voxel_layer_plugin",
+        ":test_utils",
         "//third_party/ros:roscpp",
         "@gtests//:gtest",
         "@openvdb",

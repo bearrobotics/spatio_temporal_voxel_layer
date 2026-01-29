@@ -8,45 +8,13 @@
 #include "spatio_temporal_voxel_layer/frustum_factory.h"
 #include "spatio_temporal_voxel_layer/measurement_reading.h"
 #include "spatio_temporal_voxel_layer/spatio_temporal_voxel_grid.hpp"
+#include "test/test_utils.h"
 
 namespace {
 
-constexpr float kVoxelSize = 0.05f;
-constexpr double kBackgroundValue = 0.0;
-constexpr int kDecayModel = volume_grid::PERSISTENT;
-constexpr double kVoxelDecay = 0.0;
-constexpr bool kPubVoxels = false;
-
-std::unique_ptr<volume_grid::SpatioTemporalVoxelGrid> MakeTestGrid() {
-  openvdb::initialize();
-  return std::make_unique<volume_grid::SpatioTemporalVoxelGrid>(
-      kVoxelSize, kBackgroundValue, kDecayModel, kVoxelDecay, kPubVoxels);
-}
-
-sensor_msgs::PointCloud2 MakePointCloud(
-    const std::vector<geometry_msgs::Point>& points) {
-  sensor_msgs::PointCloud2 cloud;
-  cloud.header.stamp = ros::Time::now();
-  cloud.header.frame_id = "map";
-
-  sensor_msgs::PointCloud2Modifier modifier(cloud);
-  modifier.setPointCloud2FieldsByString(1, "xyz");
-  modifier.resize(points.size());
-
-  sensor_msgs::PointCloud2Iterator<float> iter_x(cloud, "x");
-  sensor_msgs::PointCloud2Iterator<float> iter_y(cloud, "y");
-  sensor_msgs::PointCloud2Iterator<float> iter_z(cloud, "z");
-
-  for (const auto& pt : points) {
-    *iter_x = pt.x;
-    *iter_y = pt.y;
-    *iter_z = pt.z;
-    ++iter_x;
-    ++iter_y;
-    ++iter_z;
-  }
-  return cloud;
-}
+using spatio_temporal_voxel_layer::test_utils::kVoxelSize;
+using spatio_temporal_voxel_layer::test_utils::MakePointCloud;
+using spatio_temporal_voxel_layer::test_utils::MakeTestGrid;
 
 observation::MeasurementReading MakeMarkingReading(
     const geometry_msgs::Point& origin,

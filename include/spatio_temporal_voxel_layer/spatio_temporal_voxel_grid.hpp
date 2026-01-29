@@ -64,7 +64,9 @@
 #include <openvdb/tools/GridTransformer.h>
 #include <openvdb/tools/RayIntersector.h>
 // measurement struct and buffer
+#include <spatio_temporal_voxel_layer/dynamic_obstacle_tracker.hpp>
 #include <spatio_temporal_voxel_layer/frustum_models/depth_camera_frustum.hpp>
+#include <spatio_temporal_voxel_layer/frustum_models/footprint_frustum.hpp>
 #include <spatio_temporal_voxel_layer/frustum_models/three_dimensional_lidar_frustum.hpp>
 #include <spatio_temporal_voxel_layer/measurement_buffer.hpp>
 // Mutex and locks
@@ -106,10 +108,11 @@ class SpatioTemporalVoxelGrid {
   typedef openvdb::math::Ray<openvdb::Real> GridRay;
   typedef openvdb::math::Ray<openvdb::Real>::Vec3T Vec3Type;
 
-  SpatioTemporalVoxelGrid(const float& voxel_size,
-                          const double& background_value,
-                          const int& decay_model, const double& voxel_decay,
-                          const bool& pub_voxels);
+  SpatioTemporalVoxelGrid(
+      const float& voxel_size, const double& background_value,
+      const int& decay_model, const double& voxel_decay, const bool& pub_voxels,
+      std::unique_ptr<geometry::FootprintFrustum> safety_zone_frustum,
+      std::unique_ptr<DynamicObstacleTracker> dynamic_obstacle_tracker);
   ~SpatioTemporalVoxelGrid(void);
 
   // Core making and clearing functions
@@ -118,7 +121,40 @@ class SpatioTemporalVoxelGrid {
   void operator()(const observation::MeasurementReading& obs) const;
   void ClearFrustums(
       const std::vector<observation::MeasurementReading>& clearing_observations,
-      std::unordered_set<occupany_cell>& cleared_cells);
+      std::unordered_set<occupany_cell>& cleared_cells,
+      std::vector<DynamicObstacleReading>& dynamic_obstacle_readings);
+
+  /**
+   * @brief Updates the robot's current pose for frustum transformations.
+   * @details Stores the robot's pose which is used by safety zone frustum and
+   * dynamic obstacle tracking for coordinate transformations.
+   * @param x Robot's x position in the global frame (meters).
+   * @param y Robot's y position in the global frame (meters).
+   * @param yaw Robot's yaw orientation in the global frame (radians).
+   */
+  void SetRobotPose(double x, double y, double yaw);
+
+  /**
+   * @brief Adds frustum visualization markers for RViz display.
+   * @details Assigns sensor-specific colors to frustum markers and publishes
+   * them for visualization. Different sensors (e.g., astra_depth,
+   * astra_down_depth, astra_up_depth) are assigned unique colors.
+   * @param sensor_name Name of the sensor frustum being visualized.
+   * @param frustum_marker Marker array containing the frustum geometry.
+   */
+  void AddVisualizationMarker(
+      const std::string& sensor_name,
+      const visualization_msgs::MarkerArray& frustum_marker);
+
+  /**
+   * @brief Checks if a point is located in the sensor dead zone.
+   * @details Determines whether a given 3D point falls within the robot's
+   * safety zone frustum, which represents areas not visible to any sensor.
+   * @param point The 3D point in world coordinates to check.
+   * @return True if the point is inside the safety zone frustum (dead zone),
+   *         false otherwise or if no safety zone frustum is configured.
+   */
+  bool IsObstacleInSensorDeadZone(const openvdb::Vec3d& point) const;
 
   // Get the pointcloud of the underlying occupancy grid
   void GetOccupancyPointCloud(sensor_msgs::PointCloud2::Ptr& pc2);
@@ -165,6 +201,16 @@ class SpatioTemporalVoxelGrid {
   std::optional<openvdb::Vec3d> CheckBox(
       const openvdb::Vec3d& min_corner, const openvdb::Vec3d& max_corner) const;
 
+  /**
+   * @brief Finds all active voxels at a given XY location within a tolerance.
+   * @param x The x coordinate to search at.
+   * @param y The y coordinate to search at.
+   * @param tolerance The radial distance tolerance for matching voxels.
+   * @return A vector of world coordinates of all matching voxels.
+   */
+  std::vector<openvdb::Vec3d> GetVoxelsAtXY(double x, double y,
+                                            double tolerance) const;
+
  protected:
   // Initialize grid metadata and library
   void InitializeGrid(void);
@@ -182,7 +228,9 @@ class SpatioTemporalVoxelGrid {
                                 const double& acceleration_factor);
   void TemporalClearAndGenerateCostmap(
       std::vector<frustum_model>& frustums,
-      std::unordered_set<occupany_cell>& cleared_cells);
+      std::unordered_set<occupany_cell>& cleared_cells,
+      std::vector<std::unique_ptr<geometry::IClearingFrustum>>&
+          dynamic_obstacle_frustums);
 
   // Populate the costmap ROS api and pointcloud with a marked point
   void PopulateCostmapAndPointcloud(const openvdb::Coord& pt);
@@ -205,6 +253,14 @@ class SpatioTemporalVoxelGrid {
   std::vector<geometry_msgs::Point32>* _grid_points;
   std::unordered_map<occupany_cell, uint>* _cost_map;
   boost::mutex _grid_lock;
+  std::unique_ptr<geometry::FootprintFrustum> _safety_zone_frustum;
+  std::unique_ptr<DynamicObstacleTracker> _dynamic_obstacle_tracker;
+  ros::NodeHandle _nh;
+  ros::Publisher _frustum_viz_pub;
+  double _robot_x;
+  double _robot_y;
+  double _robot_yaw;
+  visualization_msgs::MarkerArray _frustum_markers;
 };
 
 }  // namespace volume_grid

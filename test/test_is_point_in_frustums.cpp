@@ -5,20 +5,11 @@
 #include "spatio_temporal_voxel_layer/frustum_factory.h"
 #include "spatio_temporal_voxel_layer/measurement_reading.h"
 #include "spatio_temporal_voxel_layer/spatio_temporal_voxel_grid.hpp"
+#include "test/test_utils.h"
 
 namespace {
 
-constexpr float kVoxelSize = 0.05f;
-constexpr double kBackgroundValue = 0.0;
-constexpr int kDecayModel = volume_grid::PERSISTENT;
-constexpr double kVoxelDecay = 0.0;
-constexpr bool kPubVoxels = false;
-
-std::unique_ptr<volume_grid::SpatioTemporalVoxelGrid> MakeTestGrid() {
-  openvdb::initialize();
-  return std::make_unique<volume_grid::SpatioTemporalVoxelGrid>(
-      kVoxelSize, kBackgroundValue, kDecayModel, kVoxelDecay, kPubVoxels);
-}
+using spatio_temporal_voxel_layer::test_utils::MakeTestGrid;
 
 observation::MeasurementReading MakeReading(
     ros::NodeHandle& frustum_nh, const std::string& sensor_name,

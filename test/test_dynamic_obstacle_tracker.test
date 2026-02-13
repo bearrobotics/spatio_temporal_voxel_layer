@@ -16,6 +16,7 @@
                 random_walk_probability_limit: 0.5
                 seconds_since_last_random_walk: 0.0
                 publish_visualization: false
+                max_obstacle_radius: 2.0
             invalid_missing_enable:
                 activation_velocity_threshold: 0.5
                 min_distance_between_readings_threshold: 0.1
@@ -25,6 +26,7 @@
                 inflation_radius_factor: 1.5
                 number_of_interpolation_circles: 5
                 past_time_window: 1.0
+                max_obstacle_radius: 2.0
             empty: {}
         </rosparam>
     </test>

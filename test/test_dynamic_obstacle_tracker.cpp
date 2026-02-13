@@ -20,6 +20,7 @@ DynamicObstacleTracker::Config MakeValidConfig() {
   config.past_time_window = 1.0;
   config.random_walk_probability_limit = 0.5;
   config.seconds_since_last_random_walk = 0.0;
+  config.max_obstacle_radius = 2.0;
   return config;
 }
 
@@ -189,6 +190,7 @@ TEST(ConfigValidationTest, IsValid_BoundaryValues) {
   config.past_time_window = 0.001;
   config.random_walk_probability_limit = 0.5;
   config.seconds_since_last_random_walk = 0.0;
+  config.max_obstacle_radius = 0.001;
   EXPECT_TRUE(config.IsValid());
 }
 
@@ -220,6 +222,18 @@ TEST(ConfigValidationTest, IsValid_RandomWalkBoundaryValues) {
   EXPECT_TRUE(config.IsValid());
 }
 
+TEST(ConfigValidationTest, IsValid_ZeroMaxObstacleRadius) {
+  auto config = MakeValidConfig();
+  config.max_obstacle_radius = 0.0;
+  EXPECT_FALSE(config.IsValid());
+}
+
+TEST(ConfigValidationTest, IsValid_NegativeMaxObstacleRadius) {
+  auto config = MakeValidConfig();
+  config.max_obstacle_radius = -1.0;
+  EXPECT_FALSE(config.IsValid());
+}
+
 // =============================================================================
 // LoadConfig Tests (ROS Parameter Server)
 // =============================================================================
@@ -237,6 +251,7 @@ TEST(LoadConfigTest, LoadConfig_AllParamsPresent) {
   EXPECT_DOUBLE_EQ(config->inflation_radius_factor, 1.5);
   EXPECT_EQ(config->number_of_interpolation_circles, 5);
   EXPECT_DOUBLE_EQ(config->past_time_window, 1.0);
+  EXPECT_DOUBLE_EQ(config->max_obstacle_radius, 2.0);
 }
 
 TEST(LoadConfigTest, LoadConfig_MissingEnable) {
@@ -508,6 +523,58 @@ TEST_F(DynamicObstacleTrackerTest, RemoveStaleReadings_EmptyMap) {
 }
 
 // =============================================================================
+// Max Obstacle Radius Tests
+// =============================================================================
+
+TEST_F(DynamicObstacleTrackerTest, OversizedTrack_NewReading_Removed) {
+  config_.max_obstacle_radius = 0.4;
+  config_.activation_velocity_threshold = 0.1;
+  tracker_ = DynamicObstacleTracker::Create(config_, nh_);
+
+  auto reading = MakeReadingWithModelInfo(1, 0.0, 0.0, 1.0, 0.0, 0.5f, 0.1);
+  std::vector<DynamicObstacleReading> readings = {reading};
+  tracker_->GenerateDynamicObstacleClearingFrustums(readings);
+
+  auto circles = tracker_->GenerateCircles();
+  EXPECT_TRUE(circles.empty());
+}
+
+TEST_F(DynamicObstacleTrackerTest, OversizedTrack_ExistingReading_Removed) {
+  config_.max_obstacle_radius = 0.6;
+  config_.activation_velocity_threshold = 0.1;
+  tracker_ = DynamicObstacleTracker::Create(config_, nh_);
+
+  auto reading1 = MakeReadingWithModelInfo(1, 0.0, 0.0, 1.0, 0.0, 0.3f, 0.1);
+  std::vector<DynamicObstacleReading> readings1 = {reading1};
+  tracker_->GenerateDynamicObstacleClearingFrustums(readings1);
+
+  auto reading2 = MakeReadingWithModelInfo(1, 1.0, 0.0, 1.0, 0.0, 0.7f, 0.1);
+  std::vector<DynamicObstacleReading> readings2 = {reading2};
+  tracker_->GenerateDynamicObstacleClearingFrustums(readings2);
+
+  auto circles = tracker_->GenerateCircles();
+  EXPECT_TRUE(circles.empty());
+}
+
+TEST_F(DynamicObstacleTrackerTest, OversizedTrack_WithinLimit_NotRemoved) {
+  config_.max_obstacle_radius = 1.0;
+  config_.activation_velocity_threshold = 0.1;
+  config_.seconds_since_last_random_walk = 0.0;
+  tracker_ = DynamicObstacleTracker::Create(config_, nh_);
+
+  auto reading1 = MakeReadingWithModelInfo(1, 0.0, 0.0, 1.0, 0.0, 0.5f, 0.1);
+  std::vector<DynamicObstacleReading> readings1 = {reading1};
+  tracker_->GenerateDynamicObstacleClearingFrustums(readings1);
+
+  auto reading2 = MakeReadingWithModelInfo(1, 1.0, 0.0, 1.0, 0.0, 0.5f, 0.1);
+  std::vector<DynamicObstacleReading> readings2 = {reading2};
+  tracker_->GenerateDynamicObstacleClearingFrustums(readings2);
+
+  auto circles = tracker_->GenerateCircles();
+  EXPECT_GT(circles.size(), 0u);
+}
+
+// =============================================================================
 // GenerateDynamicObstacleClearingFrustums Tests
 // =============================================================================
 
@@ -684,6 +751,115 @@ TEST_F(DynamicObstacleTrackerTest, TrackNotEnabled_NoModelInfo) {
 
   auto circles = tracker_->GenerateCircles();
   EXPECT_TRUE(circles.empty());
+}
+
+// =============================================================================
+// GetModelProbability Tests (via UpdateTrackEnabledState / GenerateCircles)
+// =============================================================================
+
+class GetModelProbabilityTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    config_ = MakeValidConfig();
+    config_.activation_velocity_threshold = 0.5;
+    config_.random_walk_probability_limit = 0.5;
+    config_.seconds_since_last_random_walk = 0.0;
+  }
+
+  // Returns true if the track gets enabled after processing readings with the
+  // given model_infos. A high velocity is used so the velocity check always
+  // passes; the enabling decision depends only on GetModelProbability output.
+  bool TrackEnabledWithModelInfos(
+      const std::vector<obstacle_detector::ModelInfo>& model_infos) {
+    tracker_ = DynamicObstacleTracker::Create(config_, nh_);
+
+    DynamicObstacleReading reading1 = MakeReading(1, 0.0, 0.0, 2.0, 0.0, 0.5f);
+    reading1.model_infos_ = model_infos;
+    std::vector<DynamicObstacleReading> readings1 = {reading1};
+    tracker_->GenerateDynamicObstacleClearingFrustums(readings1);
+
+    DynamicObstacleReading reading2 = MakeReading(1, 1.0, 0.0, 2.0, 0.0, 0.5f);
+    reading2.model_infos_ = model_infos;
+    std::vector<DynamicObstacleReading> readings2 = {reading2};
+    tracker_->GenerateDynamicObstacleClearingFrustums(readings2);
+
+    return !tracker_->GenerateCircles().empty();
+  }
+
+  ros::NodeHandle nh_{"~"};
+  DynamicObstacleTracker::Config config_;
+  std::unique_ptr<DynamicObstacleTracker> tracker_;
+};
+
+TEST_F(GetModelProbabilityTest, EmptyModelInfos) {
+  EXPECT_FALSE(TrackEnabledWithModelInfos({}));
+}
+
+TEST_F(GetModelProbabilityTest, WrongModelName) {
+  obstacle_detector::ModelInfo info;
+  info.model_name = "constant_velocity";
+  info.probability = 0.1;
+  EXPECT_FALSE(TrackEnabledWithModelInfos({info}));
+}
+
+TEST_F(GetModelProbabilityTest, MatchingModelBelowLimit) {
+  obstacle_detector::ModelInfo info;
+  info.model_name = "random_walk";
+  info.probability = 0.1;
+  EXPECT_TRUE(TrackEnabledWithModelInfos({info}));
+}
+
+TEST_F(GetModelProbabilityTest, MatchingModelAboveLimit) {
+  obstacle_detector::ModelInfo info;
+  info.model_name = "random_walk";
+  info.probability = 0.9;
+  EXPECT_FALSE(TrackEnabledWithModelInfos({info}));
+}
+
+TEST_F(GetModelProbabilityTest, MatchingModelAtExactLimit) {
+  obstacle_detector::ModelInfo info;
+  info.model_name = "random_walk";
+  info.probability = config_.random_walk_probability_limit;
+  // Probability >= limit means NOT enabled
+  EXPECT_FALSE(TrackEnabledWithModelInfos({info}));
+}
+
+TEST_F(GetModelProbabilityTest, MultipleModels_RandomWalkPresent) {
+  obstacle_detector::ModelInfo cv_info;
+  cv_info.model_name = "constant_velocity";
+  cv_info.probability = 0.8;
+
+  obstacle_detector::ModelInfo rw_info;
+  rw_info.model_name = "random_walk";
+  rw_info.probability = 0.1;
+
+  EXPECT_TRUE(TrackEnabledWithModelInfos({cv_info, rw_info}));
+}
+
+TEST_F(GetModelProbabilityTest, MultipleModels_RandomWalkNotPresent) {
+  obstacle_detector::ModelInfo cv_info;
+  cv_info.model_name = "constant_velocity";
+  cv_info.probability = 0.1;
+
+  obstacle_detector::ModelInfo static_info;
+  static_info.model_name = "static";
+  static_info.probability = 0.1;
+
+  EXPECT_FALSE(TrackEnabledWithModelInfos({cv_info, static_info}));
+}
+
+TEST_F(GetModelProbabilityTest, FirstMatchIsUsed) {
+  // If there were duplicate model names, the first one's probability is used.
+  obstacle_detector::ModelInfo rw_low;
+  rw_low.model_name = "random_walk";
+  rw_low.probability = 0.1;
+
+  obstacle_detector::ModelInfo rw_high;
+  rw_high.model_name = "random_walk";
+  rw_high.probability = 0.9;
+
+  // First match (0.1) is below limit, so track should enable
+  EXPECT_TRUE(TrackEnabledWithModelInfos({rw_low, rw_high}));
 }
 
 }  // namespace

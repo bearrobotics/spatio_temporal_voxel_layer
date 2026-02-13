@@ -74,6 +74,8 @@ class DynamicObstacleTracker {
     double seconds_since_last_random_walk = -1.0;
     /// Whether to publish visualization markers.
     bool publish_visualization = false;
+    /// Maximum allowed obstacle radius (m). Tracks exceeding this are removed.
+    double max_obstacle_radius = -1.0;
   };
 
   /**

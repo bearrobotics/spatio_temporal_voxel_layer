@@ -369,6 +369,7 @@ void SpatioTemporalVoxelLayer::ObstaclesCallback(
     reading.velocity_[0] = cluster.velocity.x;
     reading.velocity_[1] = cluster.velocity.y;
     reading.time_ = cluster.header.stamp;
+    reading.model_infos_ = cluster.model_infos;
 
     // Generate extended polygons for the dynamic obstacle
     for (const auto& polygon : cluster.extended_polygons) {

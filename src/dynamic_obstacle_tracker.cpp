@@ -31,13 +31,16 @@ DynamicObstacleTracker::Config::LoadConfig(ros::NodeHandle& nh) {
       LoadOptionalParam<double>(nh, "seconds_since_last_random_walk");
   auto publish_visualization =
       LoadOptionalParam<bool>(nh, "publish_visualization");
+  auto max_obstacle_radius =
+      LoadOptionalParam<double>(nh, "max_obstacle_radius");
 
   if (!enable || !activation_velocity_threshold ||
       !min_distance_between_readings_threshold || !interpolation_in_future ||
       !interpolation_in_past || !stale_time_threshold ||
       !inflation_radius_factor || !number_of_interpolation_circles ||
       !past_time_window || !random_walk_probability_limit ||
-      !seconds_since_last_random_walk || !publish_visualization) {
+      !seconds_since_last_random_walk || !publish_visualization ||
+      !max_obstacle_radius) {
     return std::nullopt;
   }
 
@@ -54,6 +57,7 @@ DynamicObstacleTracker::Config::LoadConfig(ros::NodeHandle& nh) {
   config.random_walk_probability_limit = *random_walk_probability_limit;
   config.seconds_since_last_random_walk = *seconds_since_last_random_walk;
   config.publish_visualization = *publish_visualization;
+  config.max_obstacle_radius = *max_obstacle_radius;
 
   return config;
 }
@@ -97,6 +101,10 @@ bool DynamicObstacleTracker::Config::IsValid() const {
   }
   if (seconds_since_last_random_walk < 0) {
     ROS_ERROR("seconds_since_last_random_walk must be >= 0");
+    return false;
+  }
+  if (max_obstacle_radius <= 0) {
+    ROS_ERROR("max_obstacle_radius must be > 0");
     return false;
   }
   return true;
@@ -234,9 +242,16 @@ DynamicObstacleTracker::GenerateDynamicObstacleClearingFrustums(
     auto it = track_map_.find(reading.tracker_id_);
     if (it == track_map_.end()) {
       AddNewReading(reading);
+      auto new_it = track_map_.find(reading.tracker_id_);
+      if (new_it->second.max_radius > config_.max_obstacle_radius) {
+        track_map_.erase(new_it);
+      }
       continue;
     }
     UpdateExistingReading(it, reading);
+    if (it->second.max_radius > config_.max_obstacle_radius) {
+      track_map_.erase(it);
+    }
   }
   RemoveStaleReadings();
 
@@ -317,7 +332,11 @@ void DynamicObstacleTracker::RemoveStaleReadings() {
 std::optional<double> DynamicObstacleTracker::GetModelProbability(
     const std::string& model,
     const std::vector<obstacle_detector::ModelInfo>& model_infos) const {
+  ROS_DEBUG_THROTTLE(1.0, "Getting model probability for model '%s'",
+                     model.c_str());
   for (const auto& model_info : model_infos) {
+    ROS_DEBUG_THROTTLE(1.0, "Model info: %s with probability %.3f",
+                       model_info.model_name.c_str(), model_info.probability);
     if (model_info.model_name == model) {
       return model_info.probability;
     }
@@ -327,22 +346,38 @@ std::optional<double> DynamicObstacleTracker::GetModelProbability(
 
 void DynamicObstacleTracker::UpdateTrackEnabledState(
     TrackInfo& track_info, const DynamicObstacleReading& reading) {
+  const uint32_t id = reading.tracker_id_;
+
   if (track_info.enabled) {
+    ROS_DEBUG_THROTTLE(1.0, "[Track %u] Already enabled, skipping", id);
     return;
   }
 
+  const double velocity_magnitude = reading.velocity_.norm();
   if (!ExceedsActivationVelocity(reading.velocity_)) {
+    ROS_DEBUG_THROTTLE(1.0,
+                       "[Track %u] Velocity %.2f m/s below threshold %.2f m/s, "
+                       "not enabling",
+                       id, velocity_magnitude,
+                       config_.activation_velocity_threshold);
     return;
   }
 
   auto random_walk_probability =
       GetModelProbability("random_walk", reading.model_infos_);
   if (!random_walk_probability) {
+    ROS_DEBUG_THROTTLE(1.0, "[Track %u] No random_walk model info available",
+                       id);
     return;
   }
 
   if (*random_walk_probability >= config_.random_walk_probability_limit) {
     track_info.last_exceeded_random_walk_limit = ros::Time::now();
+    ROS_DEBUG_THROTTLE(1.0,
+                       "[Track %u] Random walk probability %.3f >= limit %.3f, "
+                       "resetting timer",
+                       id, *random_walk_probability,
+                       config_.random_walk_probability_limit);
     return;
   }
 
@@ -350,12 +385,23 @@ void DynamicObstacleTracker::UpdateTrackEnabledState(
       (ros::Time::now() - track_info.last_exceeded_random_walk_limit).toSec();
   if (time_since_exceeded >= config_.seconds_since_last_random_walk) {
     track_info.enabled = true;
+    ROS_DEBUG_THROTTLE(
+        1.0,
+        "[Track %u] Enabled: velocity=%.2f m/s, random_walk_prob=%.3f, "
+        "time_since_exceeded=%.1fs",
+        id, velocity_magnitude, *random_walk_probability, time_since_exceeded);
+  } else {
+    ROS_DEBUG_THROTTLE(
+        1.0,
+        "[Track %u] Time since last random walk %.1fs < required %.1fs, "
+        "not yet enabling",
+        id, time_since_exceeded, config_.seconds_since_last_random_walk);
   }
 }
 
 std_msgs::ColorRGBA DynamicObstacleTracker::GetTrackColor(bool enabled) {
   std_msgs::ColorRGBA color;
-  color.a = 0.5f;
+  color.a = 0.25f;
   color.r = enabled ? 0.0f : 1.0f;
   color.g = enabled ? 1.0f : 0.0f;
   color.b = 0.0f;
@@ -468,6 +514,9 @@ void DynamicObstacleTracker::PublishVisualization() {
   int marker_id = 0;
 
   for (const auto& [tracker_id, track_info] : track_map_) {
+    if (!track_info.enabled) {
+      continue;
+    }
     const std_msgs::ColorRGBA color = GetTrackColor(track_info.enabled);
     AppendCircleMarkers(track_info, tracker_id, now, cutoff_time, color,
                         marker_id, marker_array);

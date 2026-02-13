@@ -246,6 +246,9 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
 
   bool _publish_voxels, _mapping_mode;
   ros::Publisher _voxel_pub;
+  ros::Duration publish_voxel_map_period_;
+  ros::Time last_publish_time_;
+
   ros::Publisher _blind_spot_pub;
   ros::ServiceServer _grid_saver;
   ros::ServiceServer _blind_spot_checker;

@@ -84,6 +84,10 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
   // publish the voxel grid to visualize
   _publish_voxels =
       bear::lib::ros::LoadRequiredParam<bool>(nh, "publish_voxel_map");
+  publish_voxel_map_period_ =
+      ros::Duration(bear::lib::ros::LoadRequiredParam<double>(
+          nh, "publish_voxel_map_period"));
+
   // size of each voxel in meters
   _voxel_size = bear::lib::ros::LoadRequiredParam<double>(nh, "voxel_size");
   // 1=takes highest in layers, 0=takes current layer
@@ -109,6 +113,7 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
   _decay_model = static_cast<volume_grid::GlobalDecayModel>(decay_model_int);
   // decay param
   _voxel_decay = bear::lib::ros::LoadRequiredParam<double>(nh, "voxel_decay");
+
   // whether to map or navigate
   _mapping_mode = bear::lib::ros::LoadRequiredParam<bool>(nh, "mapping_mode");
 
@@ -821,7 +826,10 @@ void SpatioTemporalVoxelLayer::updateBounds(float robot_x, float robot_y,
   UpdateROSCostmap(min_x, min_y, max_x, max_y, cleared_cells);
 
   // publish point cloud in navigation mode
-  if (_publish_voxels && !_mapping_mode) {
+  bool is_time_limit_reached =
+      ros::Time::now() > last_publish_time_ + publish_voxel_map_period_;
+  if (_publish_voxels && !_mapping_mode && is_time_limit_reached) {
+    last_publish_time_ = ros::Time::now();
     sensor_msgs::PointCloud2::Ptr pc2(new sensor_msgs::PointCloud2());
     _voxel_grid->GetOccupancyPointCloud(pc2);
     pc2->header.frame_id = _global_frame;

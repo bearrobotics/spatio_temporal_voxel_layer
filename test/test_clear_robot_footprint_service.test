@@ -1,0 +1,6 @@
+<launch>
+    <test test-name="test_clear_robot_footprint_service" pkg="spatio_temporal_voxel_layer"
+          type="test_clear_robot_footprint_service"
+          bazel="ROS/external/navigation/spatio_temporal_voxel_layer/test_clear_robot_footprint_service_runner"
+          time-limit="60" />
+</launch>

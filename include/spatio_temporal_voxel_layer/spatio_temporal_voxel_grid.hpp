@@ -125,6 +125,20 @@ class SpatioTemporalVoxelGrid {
       std::vector<DynamicObstacleReading>& dynamic_obstacle_readings);
 
   /**
+   * @brief Clears all voxels within a circular area in the XY plane.
+   * @details Iterates through all active voxels in the grid and removes any
+   * voxels whose XY position falls within the specified circular region.
+   * The Z coordinate is ignored - all voxels at any height within the circular
+   * footprint are cleared. Thread-safe operation using a mutex lock.
+   * @param center_x Center X coordinate of the circular area in the global
+   *                 frame (meters).
+   * @param center_y Center Y coordinate of the circular area in the global
+   *                 frame (meters).
+   * @param radius Radius of the circular area to clear (meters).
+   */
+  void ClearCircularArea(double center_x, double center_y, double radius);
+
+  /**
    * @brief Updates the robot's current pose for frustum transformations.
    * @details Stores the robot's pose which is used by safety zone frustum and
    * dynamic obstacle tracking for coordinate transformations.

@@ -114,6 +114,10 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
   // decay param
   _voxel_decay = bear::lib::ros::LoadRequiredParam<double>(nh, "voxel_decay");
 
+  // Load hardware robot radius for footprint clearing
+  _hardware_robot_radius =
+      bear::lib::ros::LoadRequiredParam<double>(nh, "hardware_robot_radius");
+
   // whether to map or navigate
   _mapping_mode = bear::lib::ros::LoadRequiredParam<bool>(nh, "mapping_mode");
 
@@ -176,6 +180,10 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
   _blind_spot_checker = nh.advertiseService(
       "check_blind_spot", &SpatioTemporalVoxelLayer::CheckBlindSpotCallback,
       this);
+
+  _clear_robot_footprint_server =
+      nh.advertiseService("clear_robot_footprint",
+                          &SpatioTemporalVoxelLayer::ClearRobotFootprint, this);
 
   const std::string tf_prefix = tf::getPrefixParam(prefix_nh);
   std::stringstream ss(topics_string);
@@ -358,6 +366,17 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
   // _dynamic_reconfigure_server->setCallback(f);
 
   ROS_INFO("%s initialization complete!", getName().c_str());
+}
+
+bool SpatioTemporalVoxelLayer::ClearRobotFootprint(
+    std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& resp) {
+  boost::recursive_mutex::scoped_lock lock(_voxel_grid_lock);
+
+  _voxel_grid->ClearCircularArea(_robot_x, _robot_y, _hardware_robot_radius);
+
+  resp.success = true;
+  resp.message = "Cleared robot footprint";
+  return true;
 }
 
 void SpatioTemporalVoxelLayer::ObstaclesCallback(
@@ -559,6 +578,10 @@ bool SpatioTemporalVoxelLayer::updateFootprint(float robot_x, float robot_y,
                                                float* max_y)
 /*****************************************************************************/
 {
+  _robot_x = robot_x;
+  _robot_y = robot_y;
+  _robot_yaw = robot_yaw;
+
   // updates layer costmap to include footprint for clearing in voxel grid
   if (!_update_footprint_enabled) {
     return false;

@@ -70,6 +70,7 @@
 #include <spatio_temporal_voxel_layer/CheckBlindSpot.h>
 #include <spatio_temporal_voxel_layer/SaveGrid.h>
 #include <std_srvs/SetBool.h>
+#include <std_srvs/Trigger.h>
 // projector
 #include <laser_geometry/laser_geometry.h>
 // tf
@@ -213,6 +214,20 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
       spatio_temporal_voxel_layer::CheckBlindSpot::Request& req,
       spatio_temporal_voxel_layer::CheckBlindSpot::Response& resp);
 
+  /**
+   * @brief ROS service callback to clear voxels in the robot's footprint area.
+   * @details Clears all voxels within a circular region centered at the robot's
+   * current position. The radius is determined by the hardware_robot_radius
+   * parameter loaded from ROS parameter server. This service is useful for
+   * clearing phantom obstacles that may have accumulated around the robot.
+   * Thread-safe operation using a recursive mutex lock.
+   * @param req Service request (empty for std_srvs::Trigger).
+   * @param resp Service response containing success status and a message.
+   * @return Always returns true (ROS service convention).
+   */
+  bool ClearRobotFootprint(std_srvs::Trigger::Request& req,
+                           std_srvs::Trigger::Response& resp);
+
   // Enable/Disable callback
   bool BufferEnablerCallback(
       std_srvs::SetBool::Request& request,
@@ -252,6 +267,10 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
   ros::Publisher _blind_spot_pub;
   ros::ServiceServer _grid_saver;
   ros::ServiceServer _blind_spot_checker;
+  ros::ServiceServer _clear_robot_footprint_server;
+  double _robot_x, _robot_y, _robot_yaw;
+  double _hardware_robot_radius;
+
   ros::Duration _map_save_duration;
   ros::Time _last_map_save_time;
   std::string _global_frame;

@@ -263,3 +263,17 @@ cc_ros_test(
         "@openvdb",
     ],
 )
+
+cc_ros_test(
+    name = "test_clear_robot_footprint_service",
+    size = "small",
+    srcs = ["test/test_clear_robot_footprint_service.cpp"],
+    launch_file = "test/test_clear_robot_footprint_service.test",
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        ":test_utils",
+        "//third_party/ros:roscpp",
+        "@gtests//:gtest",
+        "@openvdb",
+    ],
+)

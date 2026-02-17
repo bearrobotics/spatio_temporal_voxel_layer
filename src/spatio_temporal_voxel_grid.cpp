@@ -110,6 +110,27 @@ void SpatioTemporalVoxelGrid::SetRobotPose(double x, double y, double yaw) {
   _robot_yaw = yaw;
 }
 
+void SpatioTemporalVoxelGrid::ClearCircularArea(double center_x,
+                                                double center_y,
+                                                double radius) {
+  boost::unique_lock<boost::mutex> lock(_grid_lock);
+
+  const double radius_sq = radius * radius;
+  openvdb::DoubleGrid::ValueOnCIter cit_grid = _grid->cbeginValueOn();
+  for (; cit_grid.test(); ++cit_grid) {
+    const openvdb::Coord pt_index(cit_grid.getCoord());
+    const openvdb::Vec3d pose_world = this->IndexToWorld(pt_index);
+
+    const double dx = pose_world.x() - center_x;
+    const double dy = pose_world.y() - center_y;
+    const double distance_sq = dx * dx + dy * dy;
+
+    if (distance_sq <= radius_sq) {
+      ClearGridPoint(pt_index);
+    }
+  }
+}
+
 /*****************************************************************************/
 void SpatioTemporalVoxelGrid::ClearFrustums(
     const std::vector<observation::MeasurementReading>& clearing_readings,

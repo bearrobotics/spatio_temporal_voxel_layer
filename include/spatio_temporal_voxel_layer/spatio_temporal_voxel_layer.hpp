@@ -79,9 +79,11 @@
 #include <mutex>
 
 #include "message_filters/subscriber.h"
+#include "multi_robot_public/RobotMotions.h"
 #include "obstacle_detector/Obstacles.h"
 #include "spatio_temporal_voxel_layer/dynamic_obstacle_reading.hpp"
 #include "spatio_temporal_voxel_layer/frustum_models/footprint_frustum.hpp"
+#include "spatio_temporal_voxel_layer/robot_motion_reading.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.h"
 #include "tf2_ros/message_filter.h"
 #include "tf2_ros/transform_listener.h"
@@ -138,6 +140,18 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
   bool GetDynamicObstacleReadings(
       std::vector<DynamicObstacleReading>& dynamic_obstacle_readings);
 
+  /**
+   * @brief Retrieves robot motion readings from the buffer.
+   * @details Extracts all buffered robot motion readings and clears the
+   * internal buffer. Thread-safe operation using a mutex lock.
+   * @param[out] robot_motion_readings Vector to populate with current robot
+   *                                   motion readings.
+   * @return Always returns true to indicate readings were successfully
+   *         retrieved.
+   */
+  bool GetRobotMotionReadings(
+      std::vector<RobotMotionReading>& robot_motion_readings);
+
   // Functions to interact with maps
   void UpdateROSCostmap(
       float* min_x, float* min_y, float* max_x, float* max_y,
@@ -189,6 +203,15 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
    * @param msg Obstacle message containing detected dynamic obstacle clusters.
    */
   void ObstaclesCallback(const obstacle_detector::ObstaclesConstPtr& msg);
+
+  /**
+   * @brief Callback for processing other robot positions from RobotMotion msgs.
+   * @details Receives robot motion messages and buffers them as robot motion
+   * readings. Extracts robot position, velocity, radius, and footprint polygon.
+   * Thread-safe operation using a mutex lock.
+   * @param msg RobotMotion message containing the robot's current state.
+   */
+  void RobotMotionCallback(const multi_robot_public::RobotMotionsConstPtr& msg);
 
   // Functions for adding static obstacle zones
   bool AddStaticObservations(const observation::MeasurementReading& obs);
@@ -284,6 +307,8 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
   boost::recursive_mutex _voxel_grid_lock;
   std::vector<DynamicObstacleReading> _dynamic_obstacle_readings;
   std::mutex _dynamic_obstacle_lock;
+  std::vector<RobotMotionReading> _robot_motion_readings;
+  std::mutex _robot_motion_lock;
 };
 
 };  // namespace spatio_temporal_voxel_layer

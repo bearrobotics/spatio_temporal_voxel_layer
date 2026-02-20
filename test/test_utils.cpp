@@ -6,6 +6,7 @@
 
 #include "spatio_temporal_voxel_layer/dynamic_obstacle_tracker.hpp"
 #include "spatio_temporal_voxel_layer/frustum_models/footprint_frustum.hpp"
+#include "spatio_temporal_voxel_layer/robot_motion_tracker.hpp"
 #include "spatio_temporal_voxel_layer/spatio_temporal_voxel_grid.hpp"
 
 namespace spatio_temporal_voxel_layer {
@@ -39,11 +40,26 @@ std::unique_ptr<DynamicObstacleTracker> MakeMockDynamicObstacleTracker() {
   return DynamicObstacleTracker::Create(config, nh);
 }
 
+std::unique_ptr<RobotMotionTracker> MakeMockRobotMotionTracker() {
+  ros::NodeHandle nh;
+  RobotMotionTracker::Config config;
+  config.enable = false;
+  config.activation_velocity_threshold = 0.1;
+  config.min_distance_between_readings_threshold = 0.01;
+  config.stale_time_threshold = 1.0;
+  config.inflation_radius_factor = 1.0;
+  config.number_of_interpolation_circles = 1;
+  config.past_time_window = 1.0;
+  config.publish_visualization = false;
+  return RobotMotionTracker::Create(config, nh);
+}
+
 std::unique_ptr<volume_grid::SpatioTemporalVoxelGrid> MakeTestGrid() {
   openvdb::initialize();
   return std::make_unique<volume_grid::SpatioTemporalVoxelGrid>(
       kVoxelSize, kBackgroundValue, kDecayModel, kVoxelDecay, kPubVoxels,
-      MakeMockFootprintFrustum(), MakeMockDynamicObstacleTracker());
+      MakeMockFootprintFrustum(), MakeMockDynamicObstacleTracker(),
+      MakeMockRobotMotionTracker());
 }
 
 sensor_msgs::PointCloud2 MakePointCloud(

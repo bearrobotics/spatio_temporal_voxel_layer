@@ -1,6 +1,8 @@
 #ifndef NAVIGATION_SPATIO_TEMPORAL_VOXEL_LAYER_FRUSTUM_MODELS_POLYGON_FRUSTUM_H
 #define NAVIGATION_SPATIO_TEMPORAL_VOXEL_LAYER_FRUSTUM_MODELS_POLYGON_FRUSTUM_H
 
+#include "boost/geometry.hpp"
+#include "spatio_temporal_voxel_layer/dynamic_obstacle_reading.hpp"
 #include "spatio_temporal_voxel_layer/frustum_models/clearing_frustum.h"
 
 namespace geometry {

@@ -1,0 +1,26 @@
+<launch>
+    <test test-name="test_robot_motion_tracker" pkg="spatio_temporal_voxel_layer"
+        type="test_robot_motion_tracker"
+        bazel="ROS/external/navigation/spatio_temporal_voxel_layer/test_robot_motion_tracker_runner">
+        <rosparam command="load" ns="/robot_motion_tracker">
+            valid:
+                enable: true
+                activation_velocity_threshold: 0.1
+                min_distance_between_readings_threshold: 0.25
+                stale_time_threshold: 2.0
+                inflation_radius_factor: 1.2
+                number_of_interpolation_circles: 3
+                past_time_window: 1.0
+                publish_visualization: false
+            invalid_missing_enable:
+                activation_velocity_threshold: 0.1
+                min_distance_between_readings_threshold: 0.25
+                stale_time_threshold: 2.0
+                inflation_radius_factor: 1.2
+                number_of_interpolation_circles: 3
+                past_time_window: 1.0
+                publish_visualization: false
+            empty: {}
+        </rosparam>
+    </test>
+</launch>

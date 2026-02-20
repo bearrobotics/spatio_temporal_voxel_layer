@@ -69,6 +69,7 @@
 #include <spatio_temporal_voxel_layer/frustum_models/footprint_frustum.hpp>
 #include <spatio_temporal_voxel_layer/frustum_models/three_dimensional_lidar_frustum.hpp>
 #include <spatio_temporal_voxel_layer/measurement_buffer.hpp>
+#include <spatio_temporal_voxel_layer/robot_motion_tracker.hpp>
 // Mutex and locks
 #include <boost/thread.hpp>
 #include <boost/thread/recursive_mutex.hpp>
@@ -112,7 +113,8 @@ class SpatioTemporalVoxelGrid {
       const float& voxel_size, const double& background_value,
       const int& decay_model, const double& voxel_decay, const bool& pub_voxels,
       std::unique_ptr<geometry::FootprintFrustum> safety_zone_frustum,
-      std::unique_ptr<DynamicObstacleTracker> dynamic_obstacle_tracker);
+      std::unique_ptr<DynamicObstacleTracker> dynamic_obstacle_tracker,
+      std::unique_ptr<RobotMotionTracker> robot_motion_tracker);
   ~SpatioTemporalVoxelGrid(void);
 
   // Core making and clearing functions
@@ -122,7 +124,8 @@ class SpatioTemporalVoxelGrid {
   void ClearFrustums(
       const std::vector<observation::MeasurementReading>& clearing_observations,
       std::unordered_set<occupany_cell>& cleared_cells,
-      std::vector<DynamicObstacleReading>& dynamic_obstacle_readings);
+      std::vector<DynamicObstacleReading>& dynamic_obstacle_readings,
+      std::vector<RobotMotionReading>& robot_motion_readings);
 
   /**
    * @brief Clears all voxels within a circular area in the XY plane.
@@ -269,6 +272,7 @@ class SpatioTemporalVoxelGrid {
   boost::mutex _grid_lock;
   std::unique_ptr<geometry::FootprintFrustum> _safety_zone_frustum;
   std::unique_ptr<DynamicObstacleTracker> _dynamic_obstacle_tracker;
+  std::unique_ptr<RobotMotionTracker> _robot_motion_tracker;
   ros::NodeHandle _nh;
   ros::Publisher _frustum_viz_pub;
   double _robot_x;

@@ -70,6 +70,7 @@ ros_plugin(
         "src/frustum_models/three_dimensional_lidar_frustum.cpp",
         "src/measurement_buffer.cpp",
         "src/noise_filter.cpp",
+        "src/robot_motion_tracker.cpp",
         "src/spatio_temporal_voxel_grid.cpp",
         "src/spatio_temporal_voxel_layer.cpp",
         "src/vdb2pc.cpp",
@@ -88,6 +89,7 @@ ros_plugin(
         "//ROS/bearlib",
         "//ROS/external/navigation/costmap_2d",
         "//ROS/external/perception_pcl/pcl_ros:pcl_ros_tf",
+        "//ROS/multi_robot/public:cc_msgs",
         "//ROS/pennybot_perception/obstacle_detector:cc_obstacle_detector_msgs",
         "//third_party/pcl:common",
         "//third_party/pcl:filters",
@@ -154,6 +156,19 @@ cc_ros_test(
         "@eigen",
         "@gtests//:gtest",
         "@openvdb",
+    ],
+)
+
+cc_ros_test(
+    name = "test_robot_motion_tracker",
+    size = "small",
+    srcs = ["test/test_robot_motion_tracker.cpp"],
+    launch_file = "test/test_robot_motion_tracker.test",
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        "//third_party/ros:roscpp",
+        "@eigen",
+        "@gtests//:gtest",
     ],
 )
 

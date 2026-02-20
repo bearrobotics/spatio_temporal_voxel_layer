@@ -47,7 +47,8 @@ SpatioTemporalVoxelGrid::SpatioTemporalVoxelGrid(
     const float& voxel_size, const double& background_value,
     const int& decay_model, const double& voxel_decay, const bool& pub_voxels,
     std::unique_ptr<geometry::FootprintFrustum> safety_zone_frustum,
-    std::unique_ptr<DynamicObstacleTracker> dynamic_obstacle_tracker)
+    std::unique_ptr<DynamicObstacleTracker> dynamic_obstacle_tracker,
+    std::unique_ptr<RobotMotionTracker> robot_motion_tracker)
     : _background_value(background_value),
       _voxel_size(voxel_size),
       _decay_model(decay_model),
@@ -55,6 +56,7 @@ SpatioTemporalVoxelGrid::SpatioTemporalVoxelGrid(
       _pub_voxels(pub_voxels),
       _safety_zone_frustum(std::move(safety_zone_frustum)),
       _dynamic_obstacle_tracker(std::move(dynamic_obstacle_tracker)),
+      _robot_motion_tracker(std::move(robot_motion_tracker)),
       _grid_points(new std::vector<geometry_msgs::Point32>),
       _cost_map(new std::unordered_map<occupany_cell, uint>),
       _nh()
@@ -135,7 +137,8 @@ void SpatioTemporalVoxelGrid::ClearCircularArea(double center_x,
 void SpatioTemporalVoxelGrid::ClearFrustums(
     const std::vector<observation::MeasurementReading>& clearing_readings,
     std::unordered_set<occupany_cell>& cleared_cells,
-    std::vector<DynamicObstacleReading>& dynamic_obstacle_readings)
+    std::vector<DynamicObstacleReading>& dynamic_obstacle_readings,
+    std::vector<RobotMotionReading>& robot_motion_readings)
 /*****************************************************************************/
 {
   boost::unique_lock<boost::mutex> lock(_grid_lock);
@@ -152,17 +155,24 @@ void SpatioTemporalVoxelGrid::ClearFrustums(
 
   std::vector<frustum_model> obs_frustums;
   std::vector<std::unique_ptr<geometry::IClearingFrustum>>
-      dynamic_obstacle_frusturms;
-  dynamic_obstacle_frusturms =
+      dynamic_obstacle_frustums;
+  dynamic_obstacle_frustums =
       _dynamic_obstacle_tracker->GenerateDynamicObstacleClearingFrustums(
           dynamic_obstacle_readings);
-  if (dynamic_obstacle_frusturms.size() > 0) {
+  auto robot_motion_frustums =
+      _robot_motion_tracker->GenerateRobotMotionClearingFrustums(
+          robot_motion_readings);
+  dynamic_obstacle_frustums.insert(
+      dynamic_obstacle_frustums.end(),
+      std::make_move_iterator(robot_motion_frustums.begin()),
+      std::make_move_iterator(robot_motion_frustums.end()));
+  if (dynamic_obstacle_frustums.size() > 0) {
     ROS_WARN_THROTTLE(10, "Number of circles: %d",
-                      dynamic_obstacle_frusturms.size());
+                      dynamic_obstacle_frustums.size());
   }
   if (clearing_readings.size() == 0) {
     TemporalClearAndGenerateCostmap(obs_frustums, cleared_cells,
-                                    dynamic_obstacle_frusturms);
+                                    dynamic_obstacle_frustums);
     return;
   }
 
@@ -202,7 +212,7 @@ void SpatioTemporalVoxelGrid::ClearFrustums(
   _safety_zone_frustum->TransformModel();
   _safety_zone_frustum->PublishVisualization();
   TemporalClearAndGenerateCostmap(obs_frustums, cleared_cells,
-                                  dynamic_obstacle_frusturms);
+                                  dynamic_obstacle_frustums);
   return;
 }
 
@@ -246,7 +256,7 @@ void SpatioTemporalVoxelGrid::TemporalClearAndGenerateCostmap(
     std::vector<frustum_model>& frustums,
     std::unordered_set<occupany_cell>& cleared_cells,
     std::vector<std::unique_ptr<geometry::IClearingFrustum>>&
-        dynamic_obstacle_frusturms)
+        dynamic_obstacle_frustums)
 /*****************************************************************************/
 {
   // sample time once for all clearing readings
@@ -299,7 +309,7 @@ void SpatioTemporalVoxelGrid::TemporalClearAndGenerateCostmap(
 
     // Check if the point is in a dynamic obstacle clearing frustum
     for (const std::unique_ptr<geometry::IClearingFrustum>& frustum :
-         dynamic_obstacle_frusturms) {
+         dynamic_obstacle_frustums) {
       if (frustum->IsInside(pose_world)) {
         ROS_WARN_THROTTLE(10, "CLEARED DYNAMIC POINT:Point: [%f, %f, %f]",
                           pose_world[0], pose_world[1], pose_world[2]);

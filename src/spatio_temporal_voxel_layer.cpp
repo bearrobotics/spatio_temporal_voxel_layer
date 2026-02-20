@@ -39,6 +39,7 @@
 
 #include "bearlib/ros/param_loader.h"
 #include "spatio_temporal_voxel_layer/filter_factory.h"
+#include "spatio_temporal_voxel_layer/robot_motion_tracker.hpp"
 #include "spatio_temporal_voxel_layer/spatio_temporal_voxel_layer.hpp"
 
 namespace spatio_temporal_voxel_layer {
@@ -153,6 +154,20 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
     std::terminate();
   }
 
+  ros::NodeHandle robot_motion_clearing_nh(nh, "robot_motion_clearing");
+  auto rm_config =
+      RobotMotionTracker::Config::LoadConfig(robot_motion_clearing_nh);
+  if (!rm_config) {
+    ROS_FATAL("Failed to load robot motion tracker configuration.");
+    std::terminate();
+  }
+  auto robot_motion_tracker =
+      RobotMotionTracker::Create(*rm_config, robot_motion_clearing_nh);
+  if (!robot_motion_tracker) {
+    ROS_FATAL("Failed to create robot motion tracker.");
+    std::terminate();
+  }
+
   if (_mapping_mode) {
     _map_save_duration = ros::Duration(map_save_time);
     _last_map_save_time = ros::Time::now() - _map_save_duration;
@@ -174,7 +189,7 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
   _voxel_grid = new volume_grid::SpatioTemporalVoxelGrid(
       _voxel_size, (double)getDefaultValue(), _decay_model, _voxel_decay,
       _publish_voxels, std::move(safety_zone_frustum),
-      std::move(dynamic_obstacle_tracker));
+      std::move(dynamic_obstacle_tracker), std::move(robot_motion_tracker));
   matchSize();
   current_ = true;
   _blind_spot_checker = nh.advertiseService(
@@ -356,6 +371,18 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
       boost::bind(&SpatioTemporalVoxelLayer::ObstaclesCallback, this, _1));
   _observation_notifiers.push_back(filter);
 
+  // Setup robot motion tracker — positions are already in the map frame so no
+  // TF filter is needed.
+  std::string robot_motion_topic =
+      bear::lib::ros::LoadRequiredParam<std::string>(robot_motion_clearing_nh,
+                                                     "topic");
+  auto rm_sub = boost::make_shared<
+      message_filters::Subscriber<multi_robot_public::RobotMotions>>(
+      g_nh, robot_motion_topic, 50);
+  rm_sub->registerCallback(
+      boost::bind(&SpatioTemporalVoxelLayer::RobotMotionCallback, this, _1));
+  _observation_subscribers.push_back(rm_sub);
+
   // Dynamic reconfigure
   // TODO: @benenati RN-1794 Update dynamic reconfigure to work with new changes
   // dynamic_reconfigure::Server<dynamicReconfigureType>::CallbackType f;
@@ -419,6 +446,30 @@ bool SpatioTemporalVoxelLayer::GetDynamicObstacleReadings(
   dynamic_obstacle_readings = _dynamic_obstacle_readings;
   _dynamic_obstacle_readings.clear();
   return current;
+}
+
+void SpatioTemporalVoxelLayer::RobotMotionCallback(
+    const multi_robot_public::RobotMotionsConstPtr& msg) {
+  std::scoped_lock lock(_robot_motion_lock);
+  for (const auto& robot : msg->robot_list) {
+    RobotMotionReading& reading = _robot_motion_readings.emplace_back();
+    reading.robot_id_ = robot.robot_id;
+    reading.time_ = robot.time;
+    reading.center_ = {robot.position.x, robot.position.y};
+    reading.velocity_ = {robot.velocity.x, robot.velocity.y};
+    reading.radius_ = robot.robot_radius;
+    for (const auto& pt : robot.robot_footprint.points) {
+      reading.footprint_.outer().emplace_back(pt.x, pt.y);
+    }
+  }
+}
+
+bool SpatioTemporalVoxelLayer::GetRobotMotionReadings(
+    std::vector<RobotMotionReading>& robot_motion_readings) {
+  std::scoped_lock lock(_robot_motion_lock);
+  robot_motion_readings = _robot_motion_readings;
+  _robot_motion_readings.clear();
+  return true;
 }
 
 /*****************************************************************************/
@@ -816,9 +867,11 @@ void SpatioTemporalVoxelLayer::updateBounds(float robot_x, float robot_y,
   std::vector<observation::MeasurementReading> marking_observations,
       clearing_observations;
   std::vector<DynamicObstacleReading> dynamic_obstacle_readings;
+  std::vector<RobotMotionReading> robot_motion_readings;
   current = GetMarkingObservations(marking_observations) && current;
   current = GetClearingObservations(clearing_observations) && current;
   current = GetDynamicObstacleReadings(dynamic_obstacle_readings) && current;
+  current = GetRobotMotionReadings(robot_motion_readings) && current;
   ObservationsResetAfterReading();
   current_ = current;
 
@@ -827,7 +880,8 @@ void SpatioTemporalVoxelLayer::updateBounds(float robot_x, float robot_y,
   // navigation mode: clear observations, mapping mode: save maps and publish
   if (!_mapping_mode) {
     _voxel_grid->ClearFrustums(clearing_observations, cleared_cells,
-                               dynamic_obstacle_readings);
+                               dynamic_obstacle_readings,
+                               robot_motion_readings);
   } else if (ros::Time::now() - _last_map_save_time > _map_save_duration) {
     _last_map_save_time = ros::Time::now();
     time_t rawtime;

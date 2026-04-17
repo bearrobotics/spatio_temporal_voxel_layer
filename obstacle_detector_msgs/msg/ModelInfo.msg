@@ -1,0 +1,4 @@
+string model_name
+float64 probability
+float64 pred_probability
+float64 likelihood

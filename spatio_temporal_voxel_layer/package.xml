@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<package format="2">
+    <name>spatio_temporal_voxel_layer</name>
+    <version>1.0.0</version>
+    <description>
+        An OpenVDB-powered 3D costmap layer for ROS navigation.
+        Fork of Steve Macenski's spatio_temporal_voxel_layer with additions
+        for dynamic obstacle tracking, multi-robot clearing, blind spot
+        detection, noise filtering, and footprint frustum models.
+    </description>
+
+    <maintainer email="shivani.sivakumar@bearrobotics.ai">Shivani Sivakumar</maintainer>
+    <author email="stevenmacenski@gmail.com">Steve Macenski</author>
+
+    <license>LGPL-2.1</license>
+
+    <url type="repository">https://github.com/shivanisivakumar/spatio_temporal_voxel_layer</url>
+
+    <buildtool_depend>catkin</buildtool_depend>
+
+    <build_depend>message_generation</build_depend>
+
+    <depend>costmap_2d</depend>
+    <depend>dynamic_reconfigure</depend>
+    <depend>geometry_msgs</depend>
+    <depend>laser_geometry</depend>
+    <depend>multi_robot_public</depend>
+    <depend>obstacle_detector</depend>
+    <depend>pcl_ros</depend>
+    <depend>roscpp</depend>
+    <depend>sensor_msgs</depend>
+    <depend>std_msgs</depend>
+    <depend>std_srvs</depend>
+    <depend>tf2</depend>
+    <depend>tf2_geometry_msgs</depend>
+    <depend>tf2_ros</depend>
+    <depend>tf2_sensor_msgs</depend>
+    <depend>visualization_msgs</depend>
+
+    <exec_depend>message_runtime</exec_depend>
+
+    <export>
+        <costmap_2d plugin="${prefix}/costmap_plugins.xml"/>
+    </export>
+</package>

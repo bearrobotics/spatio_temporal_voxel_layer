@@ -1,4 +1,5 @@
 load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
+load("@rules_cc//cc:defs.bzl", "cc_library")
 load(
     "//build_rules/ros:defs.bzl",
     "cc_ros_dynamic_reconfigure",
@@ -6,7 +7,6 @@ load(
     "cc_ros_test",
     "ros_dynamic_reconfigure",
     "ros_interface",
-    "ros_plugin",
 )
 
 refresh_compile_commands(
@@ -59,29 +59,9 @@ cc_ros_dynamic_reconfigure(
     dep = ":noise_filter_cfg",
 )
 
-ros_plugin(
-    name = "spatio_temporal_voxel_layer_plugin",
-    srcs = [
-        "src/dynamic_obstacle_tracker.cpp",
-        "src/filter_factory.cpp",
-        "src/frustum_factory.cpp",
-        "src/frustum_models/depth_camera_frustum.cpp",
-        "src/frustum_models/footprint_frustum.cpp",
-        "src/frustum_models/three_dimensional_lidar_frustum.cpp",
-        "src/measurement_buffer.cpp",
-        "src/noise_filter.cpp",
-        "src/robot_motion_tracker.cpp",
-        "src/spatio_temporal_voxel_grid.cpp",
-        "src/spatio_temporal_voxel_layer.cpp",
-        "src/vdb2pc.cpp",
-    ],
-    hdrs = glob([
-        "include/spatio_temporal_voxel_layer/**/*.h",
-        "include/spatio_temporal_voxel_layer/**/*.hpp",
-    ]),
-    includes = ["include"],
-    plugin_file = "costmap_plugins.xml",
-    visibility = ["//ROS/external/navigation:__subpackages__"],
+cc_library(
+    name = "stvl_external_build_deps",
+    visibility = ["//visibility:public"],
     deps = [
         ":cc_noise_filter_cfg",
         ":cc_spatio_temporal_voxel_layer",
@@ -103,6 +83,18 @@ ros_plugin(
         "@ros_geometry2//:tf2_geometry_msgs",
         "@ros_geometry2//:tf2_sensor_msgs",
     ],
+)
+
+alias(
+    name = "libspatio_temporal_voxel_layer.so",
+    actual = "@spatio_temporal_voxel_layer_external//:libspatio_temporal_voxel_layer.so",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "spatio_temporal_voxel_layer_plugin",
+    actual = "@spatio_temporal_voxel_layer_external//:spatio_temporal_voxel_layer_plugin",
+    visibility = ["//visibility:public"],
 )
 
 cc_library(

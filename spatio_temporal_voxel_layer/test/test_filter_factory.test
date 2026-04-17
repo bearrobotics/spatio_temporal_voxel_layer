@@ -1,0 +1,110 @@
+<launch>
+    <test test-name="test_filter_factory" pkg="spatio_temporal_voxel_layer"
+        type="test_filter_factory"
+        bazel="ROS/external/navigation/spatio_temporal_voxel_layer/test_filter_factory_runner">
+        <rosparam command="load" ns="/filter_factory_test">
+            <!-- Valid NoiseFilter config -->
+            noise_valid:
+                type: noise
+                min_obstacle_height: 0.1
+                max_obstacle_height: 2.0
+                mean_k: 10
+                std_dev_mul_thresh: 1.0
+                voxel_min_points: 1
+
+            <!-- Filter type tests -->
+            type_none:
+                type: none
+            type_voxel:
+                type: voxel
+            type_passthrough:
+                type: passthrough
+            type_unknown:
+                type: unknown_filter
+            type_empty:
+                type: ""
+
+            <!-- Missing type param - empty namespace -->
+            missing_type:
+                min_obstacle_height: 0.1
+                max_obstacle_height: 2.0
+
+            <!-- NoiseFilter missing params -->
+            noise_missing_min_height:
+                type: noise
+                max_obstacle_height: 2.0
+                mean_k: 10
+                std_dev_mul_thresh: 1.0
+                voxel_min_points: 1
+
+            noise_missing_max_height:
+                type: noise
+                min_obstacle_height: 0.1
+                mean_k: 10
+                std_dev_mul_thresh: 1.0
+                voxel_min_points: 1
+
+            noise_missing_mean_k:
+                type: noise
+                min_obstacle_height: 0.1
+                max_obstacle_height: 2.0
+                std_dev_mul_thresh: 1.0
+                voxel_min_points: 1
+
+            noise_missing_std_dev:
+                type: noise
+                min_obstacle_height: 0.1
+                max_obstacle_height: 2.0
+                mean_k: 10
+                voxel_min_points: 1
+
+            noise_missing_voxel_min:
+                type: noise
+                min_obstacle_height: 0.1
+                max_obstacle_height: 2.0
+                mean_k: 10
+                std_dev_mul_thresh: 1.0
+
+            <!-- NoiseFilter invalid configs -->
+            noise_negative_min_height:
+                type: noise
+                min_obstacle_height: -0.1
+                max_obstacle_height: 2.0
+                mean_k: 10
+                std_dev_mul_thresh: 1.0
+                voxel_min_points: 1
+
+            noise_max_less_than_min:
+                type: noise
+                min_obstacle_height: 2.0
+                max_obstacle_height: 0.1
+                mean_k: 10
+                std_dev_mul_thresh: 1.0
+                voxel_min_points: 1
+
+            noise_zero_mean_k:
+                type: noise
+                min_obstacle_height: 0.1
+                max_obstacle_height: 2.0
+                mean_k: 0
+                std_dev_mul_thresh: 1.0
+                voxel_min_points: 1
+
+            noise_negative_std_dev:
+                type: noise
+                min_obstacle_height: 0.1
+                max_obstacle_height: 2.0
+                mean_k: 10
+                std_dev_mul_thresh: -1.0
+                voxel_min_points: 1
+
+            noise_zero_voxel_min:
+                type: noise
+                min_obstacle_height: 0.1
+                max_obstacle_height: 2.0
+                mean_k: 10
+                std_dev_mul_thresh: 1.0
+                voxel_min_points: 0
+        </rosparam>
+    </test>
+</launch>

@@ -1,0 +1,14 @@
+<launch>
+    <test test-name="test_check_box" pkg="spatio_temporal_voxel_layer"
+        type="test_check_box"
+        bazel="ROS/external/navigation/spatio_temporal_voxel_layer/test_check_box_runner">
+        <rosparam command="load" ns="/check_box_test">
+            frustum:
+                type: 3d_camera
+                vertical_fov_angle: 1.0
+                horizontal_fov_angle: 1.2
+                min_z: 0.1
+                max_z: 5.0
+        </rosparam>
+    </test>
+</launch>

@@ -24,6 +24,7 @@ find_package(catkin REQUIRED COMPONENTS
     visualization_msgs
 )
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 find_package(OpenVDB REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED COMPONENTS common filters)

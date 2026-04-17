@@ -623,10 +623,10 @@ void SpatioTemporalVoxelLayer::ObservationsResetAfterReading() const
 }
 
 /*****************************************************************************/
-bool SpatioTemporalVoxelLayer::updateFootprint(float robot_x, float robot_y,
-                                               float robot_yaw, float* min_x,
-                                               float* min_y, float* max_x,
-                                               float* max_y)
+bool SpatioTemporalVoxelLayer::updateFootprint(double robot_x, double robot_y,
+                                               double robot_yaw, double* min_x,
+                                               double* min_y, double* max_x,
+                                               double* max_y)
 /*****************************************************************************/
 {
   _robot_x = robot_x;
@@ -813,7 +813,7 @@ void SpatioTemporalVoxelLayer::updateCosts(costmap_2d::Costmap2D& master_grid,
 
 /*****************************************************************************/
 void SpatioTemporalVoxelLayer::UpdateROSCostmap(
-    float* min_x, float* min_y, float* max_x, float* max_y,
+    double* min_x, double* min_y, double* max_x, double* max_y,
     std::unordered_set<volume_grid::occupany_cell>& cleared_cells)
 /*****************************************************************************/
 {
@@ -838,10 +838,10 @@ void SpatioTemporalVoxelLayer::UpdateROSCostmap(
 }
 
 /*****************************************************************************/
-void SpatioTemporalVoxelLayer::updateBounds(float robot_x, float robot_y,
-                                            float robot_yaw, float* min_x,
-                                            float* min_y, float* max_x,
-                                            float* max_y)
+void SpatioTemporalVoxelLayer::updateBounds(double robot_x, double robot_y,
+                                            double robot_yaw, double* min_x,
+                                            double* min_y, double* max_x,
+                                            double* max_y)
 /*****************************************************************************/
 {
   // grabs new max bounds for the costmap

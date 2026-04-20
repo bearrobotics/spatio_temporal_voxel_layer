@@ -69,7 +69,11 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
            getName().c_str());
 
   // initialize parameters, grid, and sub/pubs
+#ifdef BEAR_COSTMAP_PARENT_NH
+  ros::NodeHandle nh(parent_nh_, name_), g_nh, prefix_nh;
+#else
   ros::NodeHandle nh("~/" + name_), g_nh, prefix_nh;
+#endif
 
   _global_frame = std::string(layered_costmap_->getGlobalFrameID());
 

@@ -81,6 +81,7 @@ cc_binary(
         "include/spatio_temporal_voxel_layer/**/*.h",
         "include/spatio_temporal_voxel_layer/**/*.hpp",
     ]),
+    copts = ["-DBEAR_COSTMAP_PARENT_NH"],
     includes = ["include"],
     linkshared = True,
     visibility = ["//visibility:public"],

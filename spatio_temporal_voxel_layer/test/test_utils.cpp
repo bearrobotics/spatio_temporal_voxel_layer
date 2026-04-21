@@ -5,6 +5,7 @@
 #include <sensor_msgs/point_cloud2_iterator.h>
 
 #include "spatio_temporal_voxel_layer/dynamic_obstacle_tracker.hpp"
+#include "spatio_temporal_voxel_layer/frustum_models/footprint_clearing_prism.hpp"
 #include "spatio_temporal_voxel_layer/frustum_models/footprint_frustum.hpp"
 #include "spatio_temporal_voxel_layer/robot_motion_tracker.hpp"
 #include "spatio_temporal_voxel_layer/spatio_temporal_voxel_grid.hpp"
@@ -35,6 +36,7 @@ std::unique_ptr<DynamicObstacleTracker> MakeMockDynamicObstacleTracker() {
   config.number_of_interpolation_circles = 1;
   config.past_time_window = 1.0;
   config.random_walk_probability_limit = 0.5;
+  config.max_obstacle_radius = 1.0;
   config.seconds_since_last_random_walk = 1.0;
   config.publish_visualization = false;
   return DynamicObstacleTracker::Create(config, nh);
@@ -54,12 +56,14 @@ std::unique_ptr<RobotMotionTracker> MakeMockRobotMotionTracker() {
   return RobotMotionTracker::Create(config, nh);
 }
 
-std::unique_ptr<volume_grid::SpatioTemporalVoxelGrid> MakeTestGrid() {
+std::unique_ptr<volume_grid::SpatioTemporalVoxelGrid> MakeTestGrid(
+    std::unique_ptr<geometry::FootprintClearingPrism>
+        front_blind_spot_clearing_prism) {
   openvdb::initialize();
   return std::make_unique<volume_grid::SpatioTemporalVoxelGrid>(
       kVoxelSize, kBackgroundValue, kDecayModel, kVoxelDecay, kPubVoxels,
-      MakeMockFootprintFrustum(), MakeMockDynamicObstacleTracker(),
-      MakeMockRobotMotionTracker());
+      MakeMockFootprintFrustum(), std::move(front_blind_spot_clearing_prism),
+      MakeMockDynamicObstacleTracker(), MakeMockRobotMotionTracker());
 }
 
 sensor_msgs::PointCloud2 MakePointCloud(

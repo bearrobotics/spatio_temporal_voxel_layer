@@ -140,6 +140,32 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
     ROS_FATAL("Failed to create safety zone footprint frustum.");
     std::terminate();
   }
+
+  std::unique_ptr<geometry::FootprintClearingPrism>
+      front_blind_spot_clearing_prism;
+  ros::NodeHandle front_blind_spot_clearing_prism_nh(
+      nh, "front_blind_spot_clearing_prism");
+  if (front_blind_spot_clearing_prism_nh.hasParam("enable")) {
+    std::optional<geometry::FootprintClearingPrism::Config>
+        front_blind_spot_clearing_prism_config =
+            geometry::FootprintClearingPrism::Config::Load(
+                front_blind_spot_clearing_prism_nh);
+    if (!front_blind_spot_clearing_prism_config) {
+      ROS_FATAL("Failed to load front blind-spot clearing prism config.");
+      std::terminate();
+    }
+    if (front_blind_spot_clearing_prism_config->enable) {
+      front_blind_spot_clearing_prism =
+          geometry::FootprintClearingPrism::Create(
+              *front_blind_spot_clearing_prism_config,
+              front_blind_spot_clearing_prism_nh);
+      if (!front_blind_spot_clearing_prism) {
+        ROS_FATAL("Failed to create front blind-spot clearing prism.");
+        std::terminate();
+      }
+    }
+  }
+
   ros::NodeHandle dynamic_obstacle_clearing_nh(nh, "dynamic_obstacle_clearing");
   auto config =
       DynamicObstacleTracker::Config::LoadConfig(dynamic_obstacle_clearing_nh);
@@ -189,6 +215,7 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
   _voxel_grid = new volume_grid::SpatioTemporalVoxelGrid(
       _voxel_size, (double)getDefaultValue(), _decay_model, _voxel_decay,
       _publish_voxels, std::move(safety_zone_frustum),
+      std::move(front_blind_spot_clearing_prism),
       std::move(dynamic_obstacle_tracker), std::move(robot_motion_tracker));
   matchSize();
   current_ = true;

@@ -5,6 +5,7 @@
 #include "gtest/gtest.h"
 #include "ros/ros.h"
 #include "spatio_temporal_voxel_layer/frustum_factory.h"
+#include "spatio_temporal_voxel_layer/frustum_models/footprint_clearing_prism.hpp"
 #include "spatio_temporal_voxel_layer/measurement_reading.h"
 #include "spatio_temporal_voxel_layer/spatio_temporal_voxel_grid.hpp"
 #include "test/test_utils.h"
@@ -12,8 +13,12 @@
 namespace {
 
 using spatio_temporal_voxel_layer::test_utils::kVoxelSize;
+using spatio_temporal_voxel_layer::test_utils::MakeMockDynamicObstacleTracker;
+using spatio_temporal_voxel_layer::test_utils::MakeMockFootprintFrustum;
+using spatio_temporal_voxel_layer::test_utils::MakeMockRobotMotionTracker;
 using spatio_temporal_voxel_layer::test_utils::MakePointCloud;
 using spatio_temporal_voxel_layer::test_utils::MakeTestGrid;
+using volume_grid::occupany_cell;
 
 observation::MeasurementReading MakeMarkingReading(
     const geometry_msgs::Point& origin,
@@ -61,6 +66,22 @@ geometry_msgs::Quaternion MakeIdentityQuaternion() {
   q.z = 0.0;
   q.w = 1.0;
   return q;
+}
+
+std::unique_ptr<geometry::FootprintClearingPrism>
+MakeFrontBlindSpotClearingPrism(ros::NodeHandle nh) {
+  geometry::FootprintClearingPrism::Config config;
+  config.enable = true;
+  config.publish_visualization = false;
+  config.min_z = 0.0;
+  config.max_z = 1.2;
+  config.footprint_points = {
+      geometry::FootprintClearingPrism::Point(0.0, 0.35),
+      geometry::FootprintClearingPrism::Point(0.55, 0.25),
+      geometry::FootprintClearingPrism::Point(0.55, -0.25),
+      geometry::FootprintClearingPrism::Point(0.0, -0.35),
+  };
+  return geometry::FootprintClearingPrism::Create(config, nh);
 }
 
 class CheckBoxTest : public ::testing::Test {
@@ -219,6 +240,36 @@ TEST_F(CheckBoxTest, ObstacleOutsideSensorRange_IsBlindSpot) {
   auto result = grid_->CheckBox(min_corner, max_corner);
   // Obstacle is too far for sensor, so it's a blind spot
   ASSERT_TRUE(result.has_value());
+}
+
+TEST_F(CheckBoxTest, FrontBlindSpotClearingPrismClearsStaleVoxel) {
+  ros::NodeHandle prism_nh("/check_box_test/front_blind_spot_clearing_prism");
+  grid_ = std::make_unique<volume_grid::SpatioTemporalVoxelGrid>(
+      spatio_temporal_voxel_layer::test_utils::kVoxelSize,
+      spatio_temporal_voxel_layer::test_utils::kBackgroundValue,
+      spatio_temporal_voxel_layer::test_utils::kDecayModel,
+      spatio_temporal_voxel_layer::test_utils::kVoxelDecay,
+      spatio_temporal_voxel_layer::test_utils::kPubVoxels,
+      MakeMockFootprintFrustum(), MakeFrontBlindSpotClearingPrism(prism_nh),
+      MakeMockDynamicObstacleTracker(), MakeMockRobotMotionTracker());
+
+  geometry_msgs::Point stale_obstacle = MakePoint(0.3, 0.0, 0.95);
+  MarkObstacle(MakePoint(0.0, 0.0, 0.0), {stale_obstacle});
+  grid_->SetRobotPose(0.0, 0.0, 0.0);
+
+  std::unordered_set<occupany_cell> cleared_cells;
+  std::vector<DynamicObstacleReading> dynamic_obstacle_readings;
+  std::vector<RobotMotionReading> robot_motion_readings;
+  grid_->ClearFrustums({}, cleared_cells, dynamic_obstacle_readings,
+                       robot_motion_readings);
+
+  openvdb::Vec3d min_corner(0.1, -0.1, 0.8);
+  openvdb::Vec3d max_corner(0.4, 0.1, 1.1);
+  std::optional<openvdb::Vec3d> result =
+      grid_->CheckBox(min_corner, max_corner);
+  EXPECT_FALSE(result.has_value())
+      << "Front blind-spot clearing prism should clear stale voxels in the "
+         "configured near-field region";
 }
 
 }  // namespace

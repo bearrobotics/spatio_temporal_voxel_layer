@@ -146,6 +146,15 @@ rgbd_obstacle_layer:
     horizontal_fov_angle: 1.04   #default 1.04, radians
     decay_acceleration: 1.       #default 0, 1/s^2. If laser scanner MUST be 0
     model_type: 0                #default 0 (depth camera). Use 1 for 3D Lidar
+  front_blind_spot_clearing_prism:
+    enable: true                 # optional robot-anchored near-field clearing prism
+    publish_visualization: true  # publish prism edges for RViz debugging
+    min_z: 0.4                   # meters, inclusive lower clearing bound
+    max_z: 1.2                   # meters, inclusive upper clearing bound
+    point1: [0.0, 0.2]          # polygon points in base_footprint
+    point2: [0.32, 0.2]
+    point3: [0.32, -0.2]
+    point4: [0.0, -0.2]
 ```
 More configuration samples are included in the example folder, including a 3D lidar one.
 

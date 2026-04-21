@@ -66,6 +66,7 @@
 // measurement struct and buffer
 #include <spatio_temporal_voxel_layer/dynamic_obstacle_tracker.hpp>
 #include <spatio_temporal_voxel_layer/frustum_models/depth_camera_frustum.hpp>
+#include <spatio_temporal_voxel_layer/frustum_models/footprint_clearing_prism.hpp>
 #include <spatio_temporal_voxel_layer/frustum_models/footprint_frustum.hpp>
 #include <spatio_temporal_voxel_layer/frustum_models/three_dimensional_lidar_frustum.hpp>
 #include <spatio_temporal_voxel_layer/measurement_buffer.hpp>
@@ -91,14 +92,9 @@ struct occupany_cell {
 
 // Structure for wrapping frustum model and necessary metadata
 struct frustum_model {
-  frustum_model(geometry::Frustum* _frustum, const double& _factor)
-      : frustum(_frustum), accel_factor(_factor) {}
-  ~frustum_model() {
-    if (frustum) {
-      delete frustum;
-    }
-  }
-  geometry::Frustum* frustum;
+  frustum_model(std::unique_ptr<geometry::Frustum> _frustum, double _factor)
+      : frustum(std::move(_frustum)), accel_factor(_factor) {}
+  std::unique_ptr<geometry::Frustum> frustum;
   const double accel_factor;
 };
 
@@ -113,6 +109,8 @@ class SpatioTemporalVoxelGrid {
       const float& voxel_size, const double& background_value,
       const int& decay_model, const double& voxel_decay, const bool& pub_voxels,
       std::unique_ptr<geometry::FootprintFrustum> safety_zone_frustum,
+      std::unique_ptr<geometry::FootprintClearingPrism>
+          front_blind_spot_clearing_prism,
       std::unique_ptr<DynamicObstacleTracker> dynamic_obstacle_tracker,
       std::unique_ptr<RobotMotionTracker> robot_motion_tracker);
   ~SpatioTemporalVoxelGrid(void);
@@ -271,6 +269,8 @@ class SpatioTemporalVoxelGrid {
   std::unordered_map<occupany_cell, uint>* _cost_map;
   boost::mutex _grid_lock;
   std::unique_ptr<geometry::FootprintFrustum> _safety_zone_frustum;
+  std::unique_ptr<geometry::FootprintClearingPrism>
+      _front_blind_spot_clearing_prism;
   std::unique_ptr<DynamicObstacleTracker> _dynamic_obstacle_tracker;
   std::unique_ptr<RobotMotionTracker> _robot_motion_tracker;
   ros::NodeHandle _nh;

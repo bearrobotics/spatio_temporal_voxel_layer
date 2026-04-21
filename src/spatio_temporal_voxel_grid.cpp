@@ -47,6 +47,8 @@ SpatioTemporalVoxelGrid::SpatioTemporalVoxelGrid(
     const float& voxel_size, const double& background_value,
     const int& decay_model, const double& voxel_decay, const bool& pub_voxels,
     std::unique_ptr<geometry::FootprintFrustum> safety_zone_frustum,
+    std::unique_ptr<geometry::FootprintClearingPrism>
+        front_blind_spot_clearing_prism,
     std::unique_ptr<DynamicObstacleTracker> dynamic_obstacle_tracker,
     std::unique_ptr<RobotMotionTracker> robot_motion_tracker)
     : _background_value(background_value),
@@ -55,6 +57,8 @@ SpatioTemporalVoxelGrid::SpatioTemporalVoxelGrid(
       _voxel_decay(voxel_decay),
       _pub_voxels(pub_voxels),
       _safety_zone_frustum(std::move(safety_zone_frustum)),
+      _front_blind_spot_clearing_prism(
+          std::move(front_blind_spot_clearing_prism)),
       _dynamic_obstacle_tracker(std::move(dynamic_obstacle_tracker)),
       _robot_motion_tracker(std::move(robot_motion_tracker)),
       _grid_points(new std::vector<geometry_msgs::Point32>),
@@ -143,6 +147,26 @@ void SpatioTemporalVoxelGrid::ClearFrustums(
 {
   boost::unique_lock<boost::mutex> lock(_grid_lock);
 
+  // Keep robot-anchored debug geometry current even when no voxels are active.
+  geometry_msgs::Point robot_position;
+  robot_position.x = _robot_x;
+  robot_position.y = _robot_y;
+  robot_position.z = 0.0;
+  tf2::Quaternion q;
+  // roll=0, pitch=0, yaw=yaw
+  q.setRPY(0, 0, _robot_yaw);
+  geometry_msgs::Quaternion robot_orientation = tf2::toMsg(q);
+  _safety_zone_frustum->SetPosition(robot_position);
+  _safety_zone_frustum->SetOrientation(robot_orientation);
+  _safety_zone_frustum->TransformModel();
+  _safety_zone_frustum->PublishVisualization();
+  if (_front_blind_spot_clearing_prism) {
+    _front_blind_spot_clearing_prism->SetPosition(robot_position);
+    _front_blind_spot_clearing_prism->SetOrientation(robot_orientation);
+    _front_blind_spot_clearing_prism->TransformModel();
+    _front_blind_spot_clearing_prism->PublishVisualization();
+  }
+
   // accelerate the decay of voxels interior to the frustum
   if (this->IsGridEmpty()) {
     _grid_points->clear();
@@ -170,47 +194,28 @@ void SpatioTemporalVoxelGrid::ClearFrustums(
     ROS_WARN_THROTTLE(10, "Number of circles: %d",
                       dynamic_obstacle_frustums.size());
   }
-  if (clearing_readings.size() == 0) {
-    TemporalClearAndGenerateCostmap(obs_frustums, cleared_cells,
-                                    dynamic_obstacle_frustums);
-    return;
-  }
-
   _frustum_markers.markers.clear();
-  obs_frustums.reserve(clearing_readings.size());
+  if (!clearing_readings.empty()) {
+    obs_frustums.reserve(clearing_readings.size());
 
-  std::vector<observation::MeasurementReading>::const_iterator it =
-      clearing_readings.begin();
-  for (it; it != clearing_readings.end(); ++it) {
-    geometry::Frustum* frustum = (it->_frustrum_factory)().release();
-    // This sets the position and orientation of the frustum
-    frustum->SetPosition(it->_origin);
-    frustum->SetOrientation(it->_orientation);
-    frustum->TransformModel();
+    for (const observation::MeasurementReading& reading : clearing_readings) {
+      std::unique_ptr<geometry::Frustum> frustum =
+          (reading._frustrum_factory)();
+      frustum->SetPosition(reading._origin);
+      frustum->SetOrientation(reading._orientation);
+      frustum->TransformModel();
 
-    visualization_msgs::MarkerArray frustum_marker;
-    frustum->GetVisualizationMarker(frustum_marker);
-    AddVisualizationMarker(it->_sensor_name, frustum_marker);
-    obs_frustums.emplace_back(frustum, it->_decay_acceleration);
-    UpdateLastReadings(*it);
+      visualization_msgs::MarkerArray frustum_marker;
+      frustum->GetVisualizationMarker(frustum_marker);
+      AddVisualizationMarker(reading._sensor_name, frustum_marker);
+      obs_frustums.emplace_back(std::move(frustum),
+                                reading._decay_acceleration);
+      UpdateLastReadings(reading);
+    }
+    if (!_frustum_markers.markers.empty()) {
+      _frustum_viz_pub.publish(_frustum_markers);
+    }
   }
-  if (!_frustum_markers.markers.empty()) {
-    _frustum_viz_pub.publish(_frustum_markers);
-  }
-  // We need to get the robot's current position and orientation for the safety
-  // zone
-  geometry_msgs::Point robot_position;
-  robot_position.x = _robot_x;
-  robot_position.y = _robot_y;
-  robot_position.z = 0.0;
-  tf2::Quaternion q;
-  // roll=0, pitch=0, yaw=yaw
-  q.setRPY(0, 0, _robot_yaw);
-  geometry_msgs::Quaternion robot_orientation = tf2::toMsg(q);
-  _safety_zone_frustum->SetPosition(robot_position);
-  _safety_zone_frustum->SetOrientation(robot_orientation);
-  _safety_zone_frustum->TransformModel();
-  _safety_zone_frustum->PublishVisualization();
   TemporalClearAndGenerateCostmap(obs_frustums, cleared_cells,
                                   dynamic_obstacle_frustums);
   return;
@@ -293,7 +298,7 @@ void SpatioTemporalVoxelGrid::TemporalClearAndGenerateCostmap(
           // expired by acceleration
           cleared_point = true;
           if (!this->ClearGridPoint(pt_index)) {
-            ROS_WARN("Failed to clear point.");
+            ROS_WARN_THROTTLE(5.0, "Failed to clear point.");
           }
           break;
         } else {
@@ -316,9 +321,18 @@ void SpatioTemporalVoxelGrid::TemporalClearAndGenerateCostmap(
         frustum_cycle = true;
         cleared_point = true;
         if (!this->ClearGridPoint(pt_index)) {
-          ROS_WARN("Failed to clear point.");
+          ROS_WARN_THROTTLE(5.0, "Failed to clear point.");
         }
         break;
+      }
+    }
+
+    if (!cleared_point && _front_blind_spot_clearing_prism &&
+        _front_blind_spot_clearing_prism->IsInside(pose_world)) {
+      frustum_cycle = true;
+      cleared_point = true;
+      if (!this->ClearGridPoint(pt_index)) {
+        ROS_WARN_THROTTLE(5.0, "Failed to clear point.");
       }
     }
 
@@ -332,7 +346,7 @@ void SpatioTemporalVoxelGrid::TemporalClearAndGenerateCostmap(
         // expired by temporal clearing
         cleared_point = true;
         if (!this->ClearGridPoint(pt_index)) {
-          ROS_WARN("Failed to clear point.");
+          ROS_WARN_THROTTLE(5.0, "Failed to clear point.");
         }
       }
     }
@@ -409,6 +423,10 @@ std::optional<openvdb::Vec3d> SpatioTemporalVoxelGrid::CheckBox(
     // Convert the index back to world space for output
     openvdb::Vec3d active_voxel_in_box =
         transform.indexToWorld(iter.getCoord());
+    if (_front_blind_spot_clearing_prism &&
+        _front_blind_spot_clearing_prism->IsInside(active_voxel_in_box)) {
+      continue;
+    }
     if (IsPointInLastSensorFrustums(active_voxel_in_box)) {
       continue;
     }

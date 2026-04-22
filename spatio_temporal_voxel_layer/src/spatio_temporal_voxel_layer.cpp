@@ -887,8 +887,8 @@ void SpatioTemporalVoxelLayer::updateBounds(double robot_x, double robot_y,
   // STVL on the fly so I have play games with the API even though this isn't
   // really a rolling plugin implementation. It works, but isn't ideal.
   if (layered_costmap_->isRolling()) {
-    updateOrigin(robot_x - getSizeInMetersX() / 2,
-                 robot_y - getSizeInMetersY() / 2);
+    updateOrigin(robot_x - static_cast<double>(getSizeInMetersX()) / 2,
+                 robot_y - static_cast<double>(getSizeInMetersY()) / 2);
   }
 
   useExtraBounds(min_x, min_y, max_x, max_y);

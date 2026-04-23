@@ -69,7 +69,11 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
            getName().c_str());
 
   // initialize parameters, grid, and sub/pubs
+#ifdef BEAR_COSTMAP_PARENT_NH
   ros::NodeHandle nh(parent_nh_, name_), g_nh, prefix_nh;
+#else
+  ros::NodeHandle nh("~/" + name_), g_nh, prefix_nh;
+#endif
 
   _global_frame = std::string(layered_costmap_->getGlobalFrameID());
 
@@ -650,10 +654,10 @@ void SpatioTemporalVoxelLayer::ObservationsResetAfterReading() const
 }
 
 /*****************************************************************************/
-bool SpatioTemporalVoxelLayer::updateFootprint(float robot_x, float robot_y,
-                                               float robot_yaw, float* min_x,
-                                               float* min_y, float* max_x,
-                                               float* max_y)
+bool SpatioTemporalVoxelLayer::updateFootprint(double robot_x, double robot_y,
+                                               double robot_yaw, double* min_x,
+                                               double* min_y, double* max_x,
+                                               double* max_y)
 /*****************************************************************************/
 {
   _robot_x = robot_x;
@@ -840,7 +844,7 @@ void SpatioTemporalVoxelLayer::updateCosts(costmap_2d::Costmap2D& master_grid,
 
 /*****************************************************************************/
 void SpatioTemporalVoxelLayer::UpdateROSCostmap(
-    float* min_x, float* min_y, float* max_x, float* max_y,
+    double* min_x, double* min_y, double* max_x, double* max_y,
     std::unordered_set<volume_grid::occupany_cell>& cleared_cells)
 /*****************************************************************************/
 {
@@ -865,10 +869,10 @@ void SpatioTemporalVoxelLayer::UpdateROSCostmap(
 }
 
 /*****************************************************************************/
-void SpatioTemporalVoxelLayer::updateBounds(float robot_x, float robot_y,
-                                            float robot_yaw, float* min_x,
-                                            float* min_y, float* max_x,
-                                            float* max_y)
+void SpatioTemporalVoxelLayer::updateBounds(double robot_x, double robot_y,
+                                            double robot_yaw, double* min_x,
+                                            double* min_y, double* max_x,
+                                            double* max_y)
 /*****************************************************************************/
 {
   // grabs new max bounds for the costmap

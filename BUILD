@@ -1,4 +1,5 @@
 load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_import", "cc_library")
 load(
     "//build_rules/ros:defs.bzl",
     "cc_ros_dynamic_reconfigure",
@@ -6,7 +7,6 @@ load(
     "cc_ros_test",
     "ros_dynamic_reconfigure",
     "ros_interface",
-    "ros_plugin",
 )
 
 refresh_compile_commands(
@@ -59,8 +59,11 @@ cc_ros_dynamic_reconfigure(
     dep = ":noise_filter_cfg",
 )
 
-ros_plugin(
-    name = "spatio_temporal_voxel_layer_plugin",
+# Dynamically linked shared library for the STVL costmap plugin.
+# Built from in-tree source; the sibling open-source repo mirrors this code.
+# Uses cc_binary(linkshared) instead of ros_plugin for LGPL 2.1 compliance.
+cc_binary(
+    name = "libspatio_temporal_voxel_layer.so",
     srcs = [
         "src/dynamic_obstacle_tracker.cpp",
         "src/filter_factory.cpp",
@@ -75,14 +78,14 @@ ros_plugin(
         "src/spatio_temporal_voxel_grid.cpp",
         "src/spatio_temporal_voxel_layer.cpp",
         "src/vdb2pc.cpp",
-    ],
-    hdrs = glob([
+    ] + glob([
         "include/spatio_temporal_voxel_layer/**/*.h",
         "include/spatio_temporal_voxel_layer/**/*.hpp",
     ]),
+    copts = ["-DBEAR_COSTMAP_PARENT_NH"],
     includes = ["include"],
-    plugin_file = "costmap_plugins.xml",
-    visibility = ["//ROS/external/navigation:__subpackages__"],
+    linkshared = True,
+    visibility = ["//visibility:public"],
     deps = [
         ":cc_noise_filter_cfg",
         ":cc_spatio_temporal_voxel_layer",
@@ -104,6 +107,18 @@ ros_plugin(
         "@ros_geometry2//:tf2_geometry_msgs",
         "@ros_geometry2//:tf2_sensor_msgs",
     ],
+)
+
+# cc_import wrapper so downstream targets can depend on the .so via deps.
+cc_import(
+    name = "spatio_temporal_voxel_layer_plugin",
+    hdrs = glob([
+        "include/spatio_temporal_voxel_layer/**/*.h",
+        "include/spatio_temporal_voxel_layer/**/*.hpp",
+    ]),
+    includes = ["include"],
+    shared_library = ":libspatio_temporal_voxel_layer.so",
+    visibility = ["//visibility:public"],
 )
 
 cc_library(

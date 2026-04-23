@@ -1,3 +1,5 @@
+# Changing something random
+#
 load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_import", "cc_library")
 load(

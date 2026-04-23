@@ -69,11 +69,7 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
            getName().c_str());
 
   // initialize parameters, grid, and sub/pubs
-#ifdef BEAR_COSTMAP_PARENT_NH
   ros::NodeHandle nh(parent_nh_, name_), g_nh, prefix_nh;
-#else
-  ros::NodeHandle nh("~/" + name_), g_nh, prefix_nh;
-#endif
 
   _global_frame = std::string(layered_costmap_->getGlobalFrameID());
 
@@ -654,10 +650,10 @@ void SpatioTemporalVoxelLayer::ObservationsResetAfterReading() const
 }
 
 /*****************************************************************************/
-bool SpatioTemporalVoxelLayer::updateFootprint(double robot_x, double robot_y,
-                                               double robot_yaw, double* min_x,
-                                               double* min_y, double* max_x,
-                                               double* max_y)
+bool SpatioTemporalVoxelLayer::updateFootprint(float robot_x, float robot_y,
+                                               float robot_yaw, float* min_x,
+                                               float* min_y, float* max_x,
+                                               float* max_y)
 /*****************************************************************************/
 {
   _robot_x = robot_x;
@@ -844,7 +840,7 @@ void SpatioTemporalVoxelLayer::updateCosts(costmap_2d::Costmap2D& master_grid,
 
 /*****************************************************************************/
 void SpatioTemporalVoxelLayer::UpdateROSCostmap(
-    double* min_x, double* min_y, double* max_x, double* max_y,
+    float* min_x, float* min_y, float* max_x, float* max_y,
     std::unordered_set<volume_grid::occupany_cell>& cleared_cells)
 /*****************************************************************************/
 {
@@ -869,10 +865,10 @@ void SpatioTemporalVoxelLayer::UpdateROSCostmap(
 }
 
 /*****************************************************************************/
-void SpatioTemporalVoxelLayer::updateBounds(double robot_x, double robot_y,
-                                            double robot_yaw, double* min_x,
-                                            double* min_y, double* max_x,
-                                            double* max_y)
+void SpatioTemporalVoxelLayer::updateBounds(float robot_x, float robot_y,
+                                            float robot_yaw, float* min_x,
+                                            float* min_y, float* max_x,
+                                            float* max_y)
 /*****************************************************************************/
 {
   // grabs new max bounds for the costmap
@@ -887,8 +883,8 @@ void SpatioTemporalVoxelLayer::updateBounds(double robot_x, double robot_y,
   // STVL on the fly so I have play games with the API even though this isn't
   // really a rolling plugin implementation. It works, but isn't ideal.
   if (layered_costmap_->isRolling()) {
-    updateOrigin(robot_x - static_cast<double>(getSizeInMetersX()) / 2,
-                 robot_y - static_cast<double>(getSizeInMetersY()) / 2);
+    updateOrigin(robot_x - getSizeInMetersX() / 2,
+                 robot_y - getSizeInMetersY() / 2);
   }
 
   useExtraBounds(min_x, min_y, max_x, max_y);

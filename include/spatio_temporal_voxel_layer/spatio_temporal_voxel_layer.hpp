@@ -107,9 +107,9 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
 
   // Core Functions
   virtual void onInitialize(void);
-  virtual void updateBounds(double robot_x, double robot_y, double robot_yaw,
-                            double* min_x, double* min_y, double* max_x,
-                            double* max_y);
+  virtual void updateBounds(float robot_x, float robot_y, float robot_yaw,
+                            float* min_x, float* min_y, float* max_x,
+                            float* max_y);
   virtual void updateCosts(costmap_2d::Costmap2D& master_grid, int min_i,
                            int min_j, int max_i, int max_j);
 
@@ -154,11 +154,10 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
 
   // Functions to interact with maps
   void UpdateROSCostmap(
-      double* min_x, double* min_y, double* max_x, double* max_y,
+      float* min_x, float* min_y, float* max_x, float* max_y,
       std::unordered_set<volume_grid::occupany_cell>& cleared_cells);
-  bool updateFootprint(double robot_x, double robot_y, double robot_yaw,
-                       double* min_x, double* min_y, double* max_x,
-                       double* max_y);
+  bool updateFootprint(float robot_x, float robot_y, float robot_yaw,
+                       float* min_x, float* min_y, float* max_x, float* max_y);
 
   /**
    * @brief Resets the underlying OpenVDB voxel grid.

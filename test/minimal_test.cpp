@@ -35,6 +35,34 @@
  * Author: Steve Macenski (steven.macenski@simberobotics.com)
  * Purpose: Test minimum configuration of costmap_2d
 /*********************************************************************/
+/*
+ * --- BEAR MODIFICATION START ---
+ * Portions Copyright (c) 2025-2026, Bear Robotics, Inc.
+ * This file was modified by Bear Robotics, Inc. between 2025 and 2026.
+ * Description of changes:
+ *  - Integration with Bear Robotics internal navigation stack
+ *  - Multi-robot obstacle tracking and coordination support
+ *  - Robot motion tracking for self-clearing
+ *  - Front blind-spot clearing prism for near-range obstacle clearing
+ *  - CheckBlindSpot and ClearRobotFootprint services
+ *  - Sensor data filtering (noise filter, frustum-based filtering)
+ *  - Safety zone frustum support
+ *  - Various bug fixes and performance improvements
+ *    (see git history for detailed per-commit changes)
+ * Contributors:
+ *  - Vincent Benenati (vincent.benenati@bearrobotics.ai)
+ * --- BEAR MODIFICATION END ---
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Lesser General Public License for more details.
+ */
 
 #include <costmap_2d/costmap_2d_ros.h>
 #include <ros/ros.h>

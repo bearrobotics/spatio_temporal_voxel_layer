@@ -66,6 +66,7 @@ ros_plugin(
         "src/filter_factory.cpp",
         "src/frustum_factory.cpp",
         "src/frustum_models/depth_camera_frustum.cpp",
+        "src/frustum_models/footprint_clearing_prism.cpp",
         "src/frustum_models/footprint_frustum.cpp",
         "src/frustum_models/three_dimensional_lidar_frustum.cpp",
         "src/measurement_buffer.cpp",
@@ -131,6 +132,16 @@ cc_ros_test(
         "//third_party/ros:roscpp",
         "@gtests//:gtest",
         "@perception_pcl//:pcl_conversions",
+    ],
+)
+
+cc_ros_test(
+    name = "test_footprint_clearing_prism",
+    size = "small",
+    srcs = ["test/test_footprint_clearing_prism.cpp"],
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        "@gtests//:gtest",
     ],
 )
 

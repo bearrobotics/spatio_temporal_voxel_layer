@@ -45,6 +45,8 @@
  *  - Multi-robot obstacle tracking and coordination support
  *  - Robot motion tracking for self-clearing
  *  - Front blind-spot clearing prism for near-range obstacle clearing
+ *  - Inter-sensor decay prism that accelerates voxel decay in the
+ *    blind-spot region between sensors
  *  - CheckBlindSpot and ClearRobotFootprint services
  *  - Sensor data filtering (noise filter, frustum-based filtering)
  *  - Safety zone frustum support
@@ -54,6 +56,7 @@
  *  - Vincent Benenati (vincent.benenati@bearrobotics.ai)
  *  - Shivani Sivakumar (shivani.sivakumar@bearrobotics.ai)
  *  - Hashir Zahir (hashir.zahir@bearrobotics.ai)
+ *  - Seung-Hun (Hoon) Han (seunghun.han@bearrobotics.ai)
  * --- BEAR MODIFICATION END ---
  *
  * This library is free software; you can redistribute it and/or
@@ -98,6 +101,7 @@
 #include <spatio_temporal_voxel_layer/frustum_models/depth_camera_frustum.hpp>
 #include <spatio_temporal_voxel_layer/frustum_models/footprint_clearing_prism.hpp>
 #include <spatio_temporal_voxel_layer/frustum_models/footprint_frustum.hpp>
+#include <spatio_temporal_voxel_layer/frustum_models/inter_sensor_decay_prism.hpp>
 #include <spatio_temporal_voxel_layer/frustum_models/three_dimensional_lidar_frustum.hpp>
 #include <spatio_temporal_voxel_layer/measurement_buffer.hpp>
 #include <spatio_temporal_voxel_layer/robot_motion_tracker.hpp>
@@ -139,6 +143,7 @@ class SpatioTemporalVoxelGrid {
       const float& voxel_size, const double& background_value,
       const int& decay_model, const double& voxel_decay, const bool& pub_voxels,
       std::unique_ptr<geometry::FootprintFrustum> safety_zone_frustum,
+      std::unique_ptr<geometry::InterSensorDecayPrism> inter_sensor_decay_prism,
       std::unique_ptr<geometry::FootprintClearingPrism>
           front_blind_spot_clearing_prism,
       std::unique_ptr<DynamicObstacleTracker> dynamic_obstacle_tracker,
@@ -299,6 +304,7 @@ class SpatioTemporalVoxelGrid {
   std::unordered_map<occupany_cell, uint>* _cost_map;
   boost::mutex _grid_lock;
   std::unique_ptr<geometry::FootprintFrustum> _safety_zone_frustum;
+  std::unique_ptr<geometry::InterSensorDecayPrism> _inter_sensor_decay_prism;
   std::unique_ptr<geometry::FootprintClearingPrism>
       _front_blind_spot_clearing_prism;
   std::unique_ptr<DynamicObstacleTracker> _dynamic_obstacle_tracker;

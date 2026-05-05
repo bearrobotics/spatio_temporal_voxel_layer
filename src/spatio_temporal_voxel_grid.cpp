@@ -43,6 +43,8 @@
  *  - Multi-robot obstacle tracking and coordination support
  *  - Robot motion tracking for self-clearing
  *  - Front blind-spot clearing prism for near-range obstacle clearing
+ *  - Inter-sensor decay prism that accelerates voxel decay in the
+ *    blind-spot region between sensors
  *  - CheckBlindSpot and ClearRobotFootprint services
  *  - Sensor data filtering (noise filter, frustum-based filtering)
  *  - Safety zone frustum support
@@ -51,6 +53,7 @@
  * Contributors:
  *  - Vincent Benenati (vincent.benenati@bearrobotics.ai)
  *  - Shivani Sivakumar (shivani.sivakumar@bearrobotics.ai)
+ *  - Seung-Hun (Hoon) Han (seunghun.han@bearrobotics.ai)
  * --- BEAR MODIFICATION END ---
  *
  * This library is free software; you can redistribute it and/or
@@ -76,6 +79,7 @@ SpatioTemporalVoxelGrid::SpatioTemporalVoxelGrid(
     const float& voxel_size, const double& background_value,
     const int& decay_model, const double& voxel_decay, const bool& pub_voxels,
     std::unique_ptr<geometry::FootprintFrustum> safety_zone_frustum,
+    std::unique_ptr<geometry::InterSensorDecayPrism> inter_sensor_decay_prism,
     std::unique_ptr<geometry::FootprintClearingPrism>
         front_blind_spot_clearing_prism,
     std::unique_ptr<DynamicObstacleTracker> dynamic_obstacle_tracker,
@@ -86,6 +90,7 @@ SpatioTemporalVoxelGrid::SpatioTemporalVoxelGrid(
       _voxel_decay(voxel_decay),
       _pub_voxels(pub_voxels),
       _safety_zone_frustum(std::move(safety_zone_frustum)),
+      _inter_sensor_decay_prism(std::move(inter_sensor_decay_prism)),
       _front_blind_spot_clearing_prism(
           std::move(front_blind_spot_clearing_prism)),
       _dynamic_obstacle_tracker(std::move(dynamic_obstacle_tracker)),
@@ -189,6 +194,12 @@ void SpatioTemporalVoxelGrid::ClearFrustums(
   _safety_zone_frustum->SetOrientation(robot_orientation);
   _safety_zone_frustum->TransformModel();
   _safety_zone_frustum->PublishVisualization();
+  if (_inter_sensor_decay_prism) {
+    _inter_sensor_decay_prism->SetPosition(robot_position);
+    _inter_sensor_decay_prism->SetOrientation(robot_orientation);
+    _inter_sensor_decay_prism->TransformModel();
+    _inter_sensor_decay_prism->PublishVisualization();
+  }
   if (_front_blind_spot_clearing_prism) {
     _front_blind_spot_clearing_prism->SetPosition(robot_position);
     _front_blind_spot_clearing_prism->SetOrientation(robot_orientation);
@@ -353,6 +364,31 @@ void SpatioTemporalVoxelGrid::TemporalClearAndGenerateCostmap(
           ROS_WARN_THROTTLE(5.0, "Failed to clear point.");
         }
         break;
+      }
+    }
+
+    // Accelerate decay for voxels in the inter-sensor blind spot
+    if (!cleared_point && !frustum_cycle && _inter_sensor_decay_prism &&
+        _inter_sensor_decay_prism->IsInside(pose_world)) {
+      frustum_cycle = true;
+
+      const double inter_sensor_acceleration = GetFrustumAcceleration(
+          time_since_marking,
+          _inter_sensor_decay_prism->decay_acceleration_factor());
+
+      const double time_until_decay =
+          base_duration_to_decay - inter_sensor_acceleration;
+      if (time_until_decay < 0.) {
+        cleared_point = true;
+        if (!this->ClearGridPoint(pt_index)) {
+          ROS_WARN("Failed to clear point.");
+        }
+      } else {
+        const double updated_mark =
+            cit_grid.getValue() - inter_sensor_acceleration;
+        if (!this->MarkGridPoint(pt_index, updated_mark)) {
+          ROS_WARN("Failed to update mark.");
+        }
       }
     }
 

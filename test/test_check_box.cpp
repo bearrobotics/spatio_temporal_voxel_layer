@@ -40,6 +40,7 @@ namespace {
 using spatio_temporal_voxel_layer::test_utils::kVoxelSize;
 using spatio_temporal_voxel_layer::test_utils::MakeMockDynamicObstacleTracker;
 using spatio_temporal_voxel_layer::test_utils::MakeMockFootprintFrustum;
+using spatio_temporal_voxel_layer::test_utils::MakeMockInterSensorDecayPrism;
 using spatio_temporal_voxel_layer::test_utils::MakeMockRobotMotionTracker;
 using spatio_temporal_voxel_layer::test_utils::MakePointCloud;
 using spatio_temporal_voxel_layer::test_utils::MakeTestGrid;
@@ -275,7 +276,8 @@ TEST_F(CheckBoxTest, FrontBlindSpotClearingPrismClearsStaleVoxel) {
       spatio_temporal_voxel_layer::test_utils::kDecayModel,
       spatio_temporal_voxel_layer::test_utils::kVoxelDecay,
       spatio_temporal_voxel_layer::test_utils::kPubVoxels,
-      MakeMockFootprintFrustum(), MakeFrontBlindSpotClearingPrism(prism_nh),
+      MakeMockFootprintFrustum(), MakeMockInterSensorDecayPrism(),
+      MakeFrontBlindSpotClearingPrism(prism_nh),
       MakeMockDynamicObstacleTracker(), MakeMockRobotMotionTracker());
 
   geometry_msgs::Point stale_obstacle = MakePoint(0.3, 0.0, 0.95);

@@ -71,6 +71,7 @@ cc_binary(
         "src/frustum_models/depth_camera_frustum.cpp",
         "src/frustum_models/footprint_clearing_prism.cpp",
         "src/frustum_models/footprint_frustum.cpp",
+        "src/frustum_models/inter_sensor_decay_prism.cpp",
         "src/frustum_models/three_dimensional_lidar_frustum.cpp",
         "src/measurement_buffer.cpp",
         "src/noise_filter.cpp",
@@ -184,6 +185,16 @@ cc_ros_test(
     name = "test_footprint_clearing_prism",
     size = "small",
     srcs = ["test/test_footprint_clearing_prism.cpp"],
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        "@gtests//:gtest",
+    ],
+)
+
+cc_ros_test(
+    name = "test_inter_sensor_decay_prism",
+    size = "small",
+    srcs = ["test/test_inter_sensor_decay_prism.cpp"],
     deps = [
         ":spatio_temporal_voxel_layer_plugin",
         "@gtests//:gtest",

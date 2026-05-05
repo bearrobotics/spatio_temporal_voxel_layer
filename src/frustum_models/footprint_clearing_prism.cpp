@@ -199,7 +199,7 @@ void FootprintClearingPrism::PublishVisualization() const {
   visualization_msgs::Marker bottom;
   bottom.header.frame_id = "map";
   bottom.header.stamp = ros::Time::now();
-  bottom.ns = "front_blind_spot_clearing_prism";
+  bottom.ns = nh_.getNamespace();
   bottom.id = 0;
   bottom.type = visualization_msgs::Marker::LINE_STRIP;
   bottom.action = visualization_msgs::Marker::ADD;

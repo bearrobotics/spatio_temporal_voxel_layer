@@ -81,13 +81,20 @@ std::unique_ptr<RobotMotionTracker> MakeMockRobotMotionTracker() {
   return RobotMotionTracker::Create(config, nh);
 }
 
+std::unique_ptr<geometry::InterSensorDecayPrism>
+MakeMockInterSensorDecayPrism() {
+  return nullptr;
+}
+
 std::unique_ptr<volume_grid::SpatioTemporalVoxelGrid> MakeTestGrid(
+    std::unique_ptr<geometry::InterSensorDecayPrism> inter_sensor_decay_prism,
     std::unique_ptr<geometry::FootprintClearingPrism>
         front_blind_spot_clearing_prism) {
   openvdb::initialize();
   return std::make_unique<volume_grid::SpatioTemporalVoxelGrid>(
       kVoxelSize, kBackgroundValue, kDecayModel, kVoxelDecay, kPubVoxels,
-      MakeMockFootprintFrustum(), std::move(front_blind_spot_clearing_prism),
+      MakeMockFootprintFrustum(), std::move(inter_sensor_decay_prism),
+      std::move(front_blind_spot_clearing_prism),
       MakeMockDynamicObstacleTracker(), MakeMockRobotMotionTracker());
 }
 

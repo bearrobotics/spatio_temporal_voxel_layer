@@ -43,6 +43,8 @@
  *  - Multi-robot obstacle tracking and coordination support
  *  - Robot motion tracking for self-clearing
  *  - Front blind-spot clearing prism for near-range obstacle clearing
+ *  - Inter-sensor decay prism that accelerates voxel decay in the
+ *    blind-spot region between sensors
  *  - CheckBlindSpot and ClearRobotFootprint services
  *  - Sensor data filtering (noise filter, frustum-based filtering)
  *  - Safety zone frustum support
@@ -52,6 +54,7 @@
  *  - Vincent Benenati (vincent.benenati@bearrobotics.ai)
  *  - Shivani Sivakumar (shivani.sivakumar@bearrobotics.ai)
  *  - Hashir Zahir (hashir.zahir@bearrobotics.ai)
+ *  - Seung-Hun (Hoon) Han (seunghun.han@bearrobotics.ai)
  * --- BEAR MODIFICATION END ---
  *
  * This library is free software; you can redistribute it and/or
@@ -175,6 +178,26 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
     std::terminate();
   }
 
+  std::unique_ptr<geometry::InterSensorDecayPrism> inter_sensor_decay_prism;
+  ros::NodeHandle inter_sensor_decay_prism_nh(nh, "inter_sensor_decay_prism");
+  if (inter_sensor_decay_prism_nh.hasParam("enable")) {
+    auto inter_sensor_decay_prism_config =
+        geometry::InterSensorDecayPrism::Config::Load(
+            inter_sensor_decay_prism_nh);
+    if (!inter_sensor_decay_prism_config) {
+      ROS_FATAL("Failed to load inter-sensor decay prism config.");
+      std::terminate();
+    }
+    if (inter_sensor_decay_prism_config->prism_config.enable) {
+      inter_sensor_decay_prism = geometry::InterSensorDecayPrism::Create(
+          *inter_sensor_decay_prism_config, inter_sensor_decay_prism_nh);
+      if (!inter_sensor_decay_prism) {
+        ROS_FATAL("Failed to create inter-sensor decay prism.");
+        std::terminate();
+      }
+    }
+  }
+
   std::unique_ptr<geometry::FootprintClearingPrism>
       front_blind_spot_clearing_prism;
   ros::NodeHandle front_blind_spot_clearing_prism_nh(
@@ -249,6 +272,7 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
   _voxel_grid = new volume_grid::SpatioTemporalVoxelGrid(
       _voxel_size, (double)getDefaultValue(), _decay_model, _voxel_decay,
       _publish_voxels, std::move(safety_zone_frustum),
+      std::move(inter_sensor_decay_prism),
       std::move(front_blind_spot_clearing_prism),
       std::move(dynamic_obstacle_tracker), std::move(robot_motion_tracker));
   matchSize();

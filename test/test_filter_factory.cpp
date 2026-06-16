@@ -31,6 +31,7 @@
 #include "ros/ros.h"
 #include "spatio_temporal_voxel_layer/filter_factory.h"
 #include "spatio_temporal_voxel_layer/noise_filter.h"
+#include "spatio_temporal_voxel_layer/passthrough_filter.h"
 
 namespace spatio_temporal_voxel_layer {
 
@@ -59,7 +60,7 @@ TEST(FilterFactoryTest, CreateFilterWithTypeVoxel) {
 TEST(FilterFactoryTest, CreateFilterWithTypePassthrough) {
   ros::NodeHandle nh("/filter_factory_test/type_passthrough");
   auto filter = FilterFactory::CreateFilter(nh);
-  EXPECT_EQ(filter, nullptr);
+  EXPECT_NE(filter, nullptr);
 }
 
 TEST(FilterFactoryTest, CreateFilterWithUnknownType) {
@@ -543,6 +544,57 @@ TEST(NoiseFilterTest, FilterAtBoundaryMaxHeight) {
   auto points = ExtractPoints(cloud);
 
   EXPECT_EQ(points.size(), 1);
+}
+
+// ============================================================================
+// PassthroughFilter Tests
+// ============================================================================
+
+TEST(PassthroughFilterTest, ApplyFilterLeavesNonEmptyCloudUnchanged) {
+  std::vector<pcl::PointXYZ> input_points = {
+      pcl::PointXYZ(1.0f, 1.0f, -10.0f),
+      pcl::PointXYZ(2.0f, 2.0f, 0.0f),
+      pcl::PointXYZ(3.0f, 3.0f, 10.0f),
+  };
+  auto cloud = CreatePointCloud(input_points);
+  auto data_before = cloud->data;
+  uint32_t width_before = cloud->width;
+
+  PassthroughFilter filter;
+  filter.ApplyFilter(cloud);
+
+  EXPECT_EQ(cloud->width, width_before);
+  EXPECT_EQ(cloud->data, data_before);
+  auto points = ExtractPoints(cloud);
+  ASSERT_EQ(points.size(), input_points.size());
+  for (size_t i = 0; i < points.size(); ++i) {
+    EXPECT_FLOAT_EQ(points[i].x, input_points[i].x);
+    EXPECT_FLOAT_EQ(points[i].y, input_points[i].y);
+    EXPECT_FLOAT_EQ(points[i].z, input_points[i].z);
+  }
+}
+
+TEST(PassthroughFilterTest, ApplyFilterOnEmptyCloudIsSafe) {
+  PassthroughFilter filter;
+  auto cloud = CreatePointCloud({});
+  filter.ApplyFilter(cloud);
+  EXPECT_EQ(ExtractPoints(cloud).size(), 0);
+}
+
+TEST(FilterFactoryTest, PassthroughFilterIsNoOp) {
+  ros::NodeHandle nh("/filter_factory_test/type_passthrough");
+  auto filter = FilterFactory::CreateFilter(nh);
+  ASSERT_NE(filter, nullptr);
+
+  std::vector<pcl::PointXYZ> input_points = {
+      pcl::PointXYZ(0.0f, 0.0f, -5.0f),
+      pcl::PointXYZ(1.0f, 1.0f, 1.0f),
+      pcl::PointXYZ(2.0f, 2.0f, 5.0f),
+  };
+  auto cloud = CreatePointCloud(input_points);
+  filter->ApplyFilter(cloud);
+  auto points = ExtractPoints(cloud);
+  EXPECT_EQ(points.size(), input_points.size());
 }
 
 TEST(NoiseFilterTest, CreateWithZeroHeightRange) {

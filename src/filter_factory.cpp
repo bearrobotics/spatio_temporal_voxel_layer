@@ -27,6 +27,7 @@
 
 #include "bearlib/ros/param_loader.h"
 #include "spatio_temporal_voxel_layer/noise_filter.h"
+#include "spatio_temporal_voxel_layer/passthrough_filter.h"
 
 namespace spatio_temporal_voxel_layer {
 
@@ -66,8 +67,7 @@ std::unique_ptr<Filter> FilterFactory::CreateVoxelGridFilter(
 
 std::unique_ptr<Filter> FilterFactory::CreatePassThroughFilter(
     ros::NodeHandle& nh) {
-  ROS_ERROR("PassThroughFilter is not implemented yet");
-  return nullptr;
+  return std::make_unique<PassthroughFilter>();
 }
 
 std::unique_ptr<Filter> FilterFactory::CreateNoiseFilter(ros::NodeHandle& nh) {

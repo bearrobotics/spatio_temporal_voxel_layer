@@ -46,7 +46,9 @@ class FilterFactory {
   /// Supported filter types:
   /// - "none": No filtering (not implemented)
   /// - "voxel": Voxel grid downsampling (not implemented)
-  /// - "passthrough": Pass-through filter (not implemented)
+  /// - "passthrough": No-op filter; cloud is forwarded untouched. Intended for
+  ///   sources where upstream (e.g. Sensor Pipeline V2) is already the single
+  ///   source of point cloud filtering.
   /// - "noise": NoiseFilter with statistical outlier removal and height
   /// filtering
   ///

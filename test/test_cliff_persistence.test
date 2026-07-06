@@ -1,0 +1,6 @@
+<launch>
+    <test test-name="test_cliff_persistence" pkg="spatio_temporal_voxel_layer"
+          type="test_cliff_persistence"
+          bazel="ROS/external/navigation/spatio_temporal_voxel_layer/test_cliff_persistence_runner"
+          time-limit="60" />
+</launch>

@@ -79,7 +79,7 @@ MeasurementBuffer::MeasurementBuffer(
     tf2_ros::Buffer& tf, const std::string& global_frame,
     const std::string& sensor_frame, const double& tf_tolerance,
     const double& decay_acceleration, const bool& marking, const bool& clearing,
-    const double& voxel_size,
+    int voxel_class, double voxel_size,
     std::unique_ptr<spatio_temporal_voxel_layer::Filter> filter,
     const bool& enabled, const bool& clear_buffer_after_reading,
     FrustumFactoryFactory::FrustumFactory frustrum_factory)
@@ -96,6 +96,7 @@ MeasurementBuffer::MeasurementBuffer(
       _decay_acceleration(decay_acceleration),
       _marking(marking),
       _clearing(clearing),
+      _voxel_class(voxel_class),
       _voxel_size(voxel_size),
       _filter(std::move(filter)),
       _enabled(enabled),
@@ -147,6 +148,7 @@ void MeasurementBuffer::BufferROSCloud(const sensor_msgs::PointCloud2& cloud)
     _observation_list.front()._decay_acceleration = _decay_acceleration;
     _observation_list.front()._clearing = _clearing;
     _observation_list.front()._marking = _marking;
+    _observation_list.front()._voxel_class = _voxel_class;
     _observation_list.front()._frustrum_factory = _frustrum_factory;
 
     if (_clearing && !_marking) {

@@ -118,6 +118,7 @@ struct MeasurementReading {
         _clearing(obs._clearing),
         _orientation(obs._orientation),
         _decay_acceleration(obs._decay_acceleration),
+        _voxel_class(obs._voxel_class),
         _frustrum_factory(obs._frustrum_factory) {}
 
   geometry_msgs::Point _origin;
@@ -128,6 +129,7 @@ struct MeasurementReading {
   double _marking;
   double _clearing;
   double _decay_acceleration;
+  int _voxel_class = 0;
   FrustumFactoryFactory::FrustumFactory _frustrum_factory;
 };
 

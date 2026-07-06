@@ -263,6 +263,8 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
   }
 
   _voxel_pub = nh.advertise<sensor_msgs::PointCloud2>("voxel_grid", 1);
+  _cliff_voxel_pub =
+      nh.advertise<sensor_msgs::PointCloud2>("cliff_voxel_grid", 1);
   _blind_spot_pub =
       nh.advertise<visualization_msgs::Marker>("blind_spot_point", 1);
   _grid_saver =
@@ -284,6 +286,17 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
   _clear_robot_footprint_server =
       nh.advertiseService("clear_robot_footprint",
                           &SpatioTemporalVoxelLayer::ClearRobotFootprint, this);
+
+  _clear_cliffs_server = nh.advertiseService(
+      "clear_cliffs", &SpatioTemporalVoxelLayer::ClearCliffsCallback, this);
+
+  const std::string pose_reset_notif_topic =
+      bear::lib::ros::LoadOptionalParam<std::string>(nh,
+                                                     "pose_reset_notif_topic")
+          .value_or("/als_ros/mcl/pose_reset_notif");
+  _pose_reset_notif_sub =
+      nh.subscribe(pose_reset_notif_topic, 1,
+                   &SpatioTemporalVoxelLayer::PoseResetNotifCallback, this);
 
   const std::string tf_prefix = tf::getPrefixParam(prefix_nh);
   std::stringstream ss(topics_string);
@@ -358,12 +371,30 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
       source_node.getParam(obstacle_range_param_name, obstacle_range);
     }
 
+    const std::string voxel_class_str =
+        bear::lib::ros::LoadOptionalParam<std::string>(source_node,
+                                                       "voxel_class")
+            .value_or("generic");
+    int voxel_class;
+    if (voxel_class_str == "generic") {
+      voxel_class = volume_grid::kGeneric;
+    } else if (voxel_class_str == "cliff") {
+      voxel_class = volume_grid::kCliff;
+    } else {
+      // Mirror LoadRequiredParam: fail robot bring-up on invalid safety config.
+      ROS_ERROR_STREAM("Invalid voxel_class '"
+                       << voxel_class_str << "' for source '" << source
+                       << "'. Expected 'generic' or 'cliff'.");
+      ::ros::shutdown();
+      return;
+    }
+
     // create an observation buffer
     _observation_buffers.push_back(boost::shared_ptr<buffer::MeasurementBuffer>(
         new buffer::MeasurementBuffer(
             topic, observation_keep_time, expected_update_rate, obstacle_range,
             tf_buffer_, _global_frame, sensor_frame, transform_tolerance,
-            decay_acceleration, marking, clearing, _voxel_size,
+            decay_acceleration, marking, clearing, voxel_class, _voxel_size,
             std::move(filter), enabled, clear_after_reading,
             frustrum_factory)));
 
@@ -489,6 +520,28 @@ bool SpatioTemporalVoxelLayer::ClearRobotFootprint(
   resp.success = true;
   resp.message = "Cleared robot footprint";
   return true;
+}
+
+bool SpatioTemporalVoxelLayer::ClearCliffsCallback(
+    std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& resp) {
+  boost::recursive_mutex::scoped_lock lock(_voxel_grid_lock);
+
+  _voxel_grid->ClearCliffs();
+
+  resp.success = true;
+  resp.message = "Cleared cliff voxels";
+  return true;
+}
+
+void SpatioTemporalVoxelLayer::activateByMapChange() {
+  boost::recursive_mutex::scoped_lock lock(_voxel_grid_lock);
+  _voxel_grid->ClearCliffs();
+}
+
+void SpatioTemporalVoxelLayer::PoseResetNotifCallback(
+    const std_msgs::String::ConstPtr& msg) {
+  boost::recursive_mutex::scoped_lock lock(_voxel_grid_lock);
+  _voxel_grid->ClearCliffs();
 }
 
 void SpatioTemporalVoxelLayer::ObstaclesCallback(
@@ -987,7 +1040,7 @@ void SpatioTemporalVoxelLayer::updateBounds(double robot_x, double robot_y,
   // update the ROS Layered Costmap
   UpdateROSCostmap(min_x, min_y, max_x, max_y, cleared_cells);
 
-  // publish point cloud in navigation mode
+  // publish point clouds in navigation mode
   bool is_time_limit_reached =
       ros::Time::now() > last_publish_time_ + publish_voxel_map_period_;
   if (_publish_voxels && !_mapping_mode && is_time_limit_reached) {
@@ -997,6 +1050,12 @@ void SpatioTemporalVoxelLayer::updateBounds(double robot_x, double robot_y,
     pc2->header.frame_id = _global_frame;
     pc2->header.stamp = ros::Time::now();
     _voxel_pub.publish(*pc2);
+
+    sensor_msgs::PointCloud2::Ptr cliff_pc2(new sensor_msgs::PointCloud2());
+    _voxel_grid->GetCliffPointCloud(cliff_pc2);
+    cliff_pc2->header.frame_id = _global_frame;
+    cliff_pc2->header.stamp = ros::Time::now();
+    _cliff_voxel_pub.publish(*cliff_pc2);
   }
 
   // update footprint

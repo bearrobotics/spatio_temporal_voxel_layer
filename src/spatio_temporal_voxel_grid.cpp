@@ -48,6 +48,8 @@
  *  - CheckBlindSpot and ClearRobotFootprint services
  *  - Sensor data filtering (noise filter, frustum-based filtering)
  *  - Safety zone frustum support
+ *  - Permanent cliff voxels (parallel per-voxel class grid; never decay or
+ *    clear) with a ClearCliffs operation
  *  - Various bug fixes and performance improvements
  *    (see git history for detailed per-commit changes)
  * Contributors:
@@ -139,6 +141,10 @@ void SpatioTemporalVoxelGrid::InitializeGrid(void)
   _grid->insertMeta("Voxel Size", openvdb::FloatMetadata(_voxel_size));
   _grid->setGridClass(openvdb::GRID_LEVEL_SET);
 
+  _class_grid = openvdb::Int32Grid::create(kGeneric);
+  _class_grid->setTransform(_grid->transform().copy());
+  _class_grid->setName("SpatioTemporalVoxelClass");
+
   _frustum_viz_pub = _nh.advertise<visualization_msgs::MarkerArray>(
       "/spatio_temporal_voxel_layer/frustums", 1);
   return;
@@ -156,9 +162,15 @@ void SpatioTemporalVoxelGrid::ClearCircularArea(double center_x,
   boost::unique_lock<boost::mutex> lock(_grid_lock);
 
   const double radius_sq = radius * radius;
+  openvdb::Int32Grid::ConstAccessor class_accessor =
+      _class_grid->getConstAccessor();
   openvdb::DoubleGrid::ValueOnCIter cit_grid = _grid->cbeginValueOn();
   for (; cit_grid.test(); ++cit_grid) {
     const openvdb::Coord pt_index(cit_grid.getCoord());
+    // Footprint clearing must not erase permanent cliffs.
+    if (class_accessor.getValue(pt_index) == kCliff) {
+      continue;
+    }
     const openvdb::Vec3d pose_world = this->IndexToWorld(pt_index);
 
     const double dx = pose_world.x() - center_x;
@@ -166,6 +178,20 @@ void SpatioTemporalVoxelGrid::ClearCircularArea(double center_x,
     const double distance_sq = dx * dx + dy * dy;
 
     if (distance_sq <= radius_sq) {
+      ClearGridPoint(pt_index);
+    }
+  }
+}
+
+void SpatioTemporalVoxelGrid::ClearCliffs(void) {
+  boost::unique_lock<boost::mutex> lock(_grid_lock);
+
+  openvdb::Int32Grid::ConstAccessor class_accessor =
+      _class_grid->getConstAccessor();
+  openvdb::DoubleGrid::ValueOnCIter cit_grid = _grid->cbeginValueOn();
+  for (; cit_grid.test(); ++cit_grid) {
+    const openvdb::Coord pt_index(cit_grid.getCoord());
+    if (class_accessor.getValue(pt_index) == kCliff) {
       ClearGridPoint(pt_index);
     }
   }
@@ -309,8 +335,18 @@ void SpatioTemporalVoxelGrid::TemporalClearAndGenerateCostmap(
 
   // check each point in the grid for inclusion in a frustum
   openvdb::DoubleGrid::ValueOnCIter cit_grid = _grid->cbeginValueOn();
+  openvdb::Int32Grid::ConstAccessor class_accessor =
+      _class_grid->getConstAccessor();
   for (cit_grid; cit_grid.test(); ++cit_grid) {
     const openvdb::Coord pt_index(cit_grid.getCoord());
+
+    // CLIFF voxels are permanent: never decay, regardless of decay model or
+    // age.
+    if (class_accessor.getValue(pt_index) == kCliff) {
+      PopulateCostmapAndPointcloud(pt_index);
+      continue;
+    }
+
     const openvdb::Vec3d pose_world = this->IndexToWorld(pt_index);
 
     std::vector<frustum_model>::iterator frustum_it = frustums.begin();
@@ -426,6 +462,7 @@ void SpatioTemporalVoxelGrid::TemporalClearAndGenerateCostmap(
 
   // free memory taken by expired voxels
   _grid->pruneGrid();
+  _class_grid->pruneGrid();
 }
 
 /*****************************************************************************/
@@ -568,13 +605,13 @@ void SpatioTemporalVoxelGrid::operator()(
 
       double x = *iter_x < 0 ? *iter_x - _voxel_size : *iter_x;
       double y = *iter_y < 0 ? *iter_y - _voxel_size : *iter_y;
-      double z = *iter_y < 0 ? *iter_z - _voxel_size : *iter_z;
+      double z = *iter_z < 0 ? *iter_z - _voxel_size : *iter_z;
 
       openvdb::Vec3d mark_grid(this->WorldToIndex(openvdb::Vec3d(x, y, z)));
 
       if (!this->MarkGridPoint(
               openvdb::Coord(mark_grid[0], mark_grid[1], mark_grid[2]),
-              cur_time)) {
+              cur_time, obs._voxel_class)) {
         ROS_WARN("Failed to mark point.");
       }
     }
@@ -652,6 +689,46 @@ void SpatioTemporalVoxelGrid::GetOccupancyPointCloud(
 }
 
 /*****************************************************************************/
+size_t SpatioTemporalVoxelGrid::GetCliffPointCloud(
+    sensor_msgs::PointCloud2::Ptr& pc2)
+/*****************************************************************************/
+{
+  _cliff_points.clear();
+  openvdb::Int32Grid::ConstAccessor class_accessor =
+      _class_grid->getConstAccessor();
+  for (openvdb::DoubleGrid::ValueOnCIter cit_grid = _grid->cbeginValueOn();
+       cit_grid.test(); ++cit_grid) {
+    const openvdb::Coord pt_index(cit_grid.getCoord());
+    if (class_accessor.getValue(pt_index) != kCliff) {
+      continue;
+    }
+    const openvdb::Vec3d pose_world = this->IndexToWorld(pt_index);
+    geometry_msgs::Point32& point = _cliff_points.emplace_back();
+    point.x = pose_world[0];
+    point.y = pose_world[1];
+    point.z = pose_world[2];
+  }
+
+  sensor_msgs::PointCloud2Modifier modifier(*pc2);
+  modifier.setPointCloud2FieldsByString(1, "xyz");
+  modifier.resize(_cliff_points.size());
+
+  sensor_msgs::PointCloud2Iterator<float> iter_x(*pc2, "x");
+  sensor_msgs::PointCloud2Iterator<float> iter_y(*pc2, "y");
+  sensor_msgs::PointCloud2Iterator<float> iter_z(*pc2, "z");
+  for (const geometry_msgs::Point32& point : _cliff_points) {
+    *iter_x = point.x;
+    *iter_y = point.y;
+    *iter_z = point.z;
+    ++iter_x;
+    ++iter_y;
+    ++iter_z;
+  }
+
+  return _cliff_points.size();
+}
+
+/*****************************************************************************/
 bool SpatioTemporalVoxelGrid::ResetGrid(void)
 /*****************************************************************************/
 {
@@ -660,6 +737,7 @@ bool SpatioTemporalVoxelGrid::ResetGrid(void)
   // clear the voxel grid
   try {
     _grid->clear();
+    _class_grid->clear();
     if (this->IsGridEmpty()) {
       return true;
     }
@@ -677,9 +755,14 @@ void SpatioTemporalVoxelGrid::ResetGridArea(const occupany_cell& start,
 {
   boost::unique_lock<boost::mutex> lock(_grid_lock);
 
+  openvdb::Int32Grid::ConstAccessor class_accessor =
+      _class_grid->getConstAccessor();
   openvdb::DoubleGrid::ValueOnCIter cit_grid = _grid->cbeginValueOn();
   for (cit_grid; cit_grid.test(); ++cit_grid) {
     const openvdb::Coord pt_index(cit_grid.getCoord());
+    if (class_accessor.getValue(pt_index) == kCliff) {
+      continue;
+    }
     const openvdb::Vec3d pose_world = this->IndexToWorld(pt_index);
 
     const bool in_x_range = pose_world.x() > start.x && pose_world.x() < end.x;
@@ -705,6 +788,19 @@ bool SpatioTemporalVoxelGrid::MarkGridPoint(const openvdb::Coord& pt,
 }
 
 /*****************************************************************************/
+bool SpatioTemporalVoxelGrid::MarkGridPoint(const openvdb::Coord& pt,
+                                            double value, int voxel_class) const
+/*****************************************************************************/
+{
+  openvdb::Int32Grid::Accessor class_accessor = _class_grid->getAccessor();
+  // CLIFF is permanent; a lower-priority class must never overwrite it.
+  if (class_accessor.getValue(pt) != kCliff) {
+    class_accessor.setValueOn(pt, voxel_class);
+  }
+  return this->MarkGridPoint(pt, value);
+}
+
+/*****************************************************************************/
 bool SpatioTemporalVoxelGrid::ClearGridPoint(const openvdb::Coord& pt) const
 /*****************************************************************************/
 {
@@ -714,6 +810,12 @@ bool SpatioTemporalVoxelGrid::ClearGridPoint(const openvdb::Coord& pt) const
   if (accessor.isValueOn(pt)) {
     accessor.setValueOff(pt, _background_value);
   }
+
+  openvdb::Int32Grid::Accessor class_accessor = _class_grid->getAccessor();
+  if (class_accessor.isValueOn(pt)) {
+    class_accessor.setValueOff(pt, kGeneric);
+  }
+
   return !accessor.isValueOn(pt);
 }
 

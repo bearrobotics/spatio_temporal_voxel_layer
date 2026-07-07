@@ -50,6 +50,8 @@
  *  - CheckBlindSpot and ClearRobotFootprint services
  *  - Sensor data filtering (noise filter, frustum-based filtering)
  *  - Safety zone frustum support
+ *  - Permanent cliff voxels (parallel per-voxel class grid; never decay or
+ *    clear) with a ClearCliffs operation
  *  - Various bug fixes and performance improvements
  *    (see git history for detailed per-commit changes)
  * Contributors:
@@ -113,6 +115,11 @@ namespace volume_grid {
 
 enum GlobalDecayModel { LINEAR = 0, EXPONENTIAL = 1, PERSISTENT = 2 };
 
+enum VoxelClass {
+  kGeneric = 0,
+  kCliff = 1,
+};
+
 // Structure for an occupied cell for map
 struct occupany_cell {
   occupany_cell(const double& _x, const double& _y) : x(_x), y(_y) {}
@@ -175,6 +182,14 @@ class SpatioTemporalVoxelGrid {
   void ClearCircularArea(double center_x, double center_y, double radius);
 
   /**
+   * @brief Removes all voxels whose class is CLIFF.
+   * @details Iterates through all active voxels and clears only those marked
+   * with the CLIFF class, leaving voxels of other classes intact. Thread-safe
+   * operation using a mutex lock.
+   */
+  void ClearCliffs(void);
+
+  /**
    * @brief Updates the robot's current pose for frustum transformations.
    * @details Stores the robot's pose which is used by safety zone frustum and
    * dynamic obstacle tracking for coordinate transformations.
@@ -209,6 +224,15 @@ class SpatioTemporalVoxelGrid {
   // Get the pointcloud of the underlying occupancy grid
   void GetOccupancyPointCloud(sensor_msgs::PointCloud2::Ptr& pc2);
   std::unordered_map<occupany_cell, uint>* GetFlattenedCostmap();
+
+  /**
+   * @brief Fills a point cloud with the world positions of all CLIFF voxels.
+   * @details Iterates the active voxels and emits one (x, y, z) point per voxel
+   * whose class is CLIFF.
+   * @param pc2 Output point cloud populated with cliff voxel positions.
+   * @return Number of cliff voxels written.
+   */
+  size_t GetCliffPointCloud(sensor_msgs::PointCloud2::Ptr& pc2);
 
   // Clear the grid
   bool ResetGrid(void);
@@ -267,6 +291,8 @@ class SpatioTemporalVoxelGrid {
 
   // grid accessor methods
   bool MarkGridPoint(const openvdb::Coord& pt, const double& value) const;
+  bool MarkGridPoint(const openvdb::Coord& pt, double value,
+                     int voxel_class) const;
   bool ClearGridPoint(const openvdb::Coord& pt) const;
 
   // Check occupancy status of the grid
@@ -297,10 +323,13 @@ class SpatioTemporalVoxelGrid {
   std::vector<LastReading> last_readings_;
 
   mutable openvdb::DoubleGrid::Ptr _grid;
+  // Class for each _grid voxel; both grids hold the same voxels.
+  mutable openvdb::Int32Grid::Ptr _class_grid;
   int _decay_model;
   double _background_value, _voxel_size, _voxel_decay;
   bool _pub_voxels;
   std::vector<geometry_msgs::Point32>* _grid_points;
+  std::vector<geometry_msgs::Point32> _cliff_points;
   std::unordered_map<occupany_cell, uint>* _cost_map;
   boost::mutex _grid_lock;
   std::unique_ptr<geometry::FootprintFrustum> _safety_zone_frustum;

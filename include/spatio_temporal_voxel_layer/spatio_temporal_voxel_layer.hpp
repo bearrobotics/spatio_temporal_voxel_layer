@@ -49,12 +49,15 @@
  *  - CheckBlindSpot and ClearRobotFootprint services
  *  - Sensor data filtering (noise filter, frustum-based filtering)
  *  - Safety zone frustum support
+ *  - Permanent cliff voxels: clear_cliffs service, pose-reset/map-change
+ *    cliff wipe, and per-source voxel_class parameter
  *  - Various bug fixes and performance improvements
  *    (see git history for detailed per-commit changes)
  * Contributors:
  *  - Vincent Benenati (vincent.benenati@bearrobotics.ai)
  *  - Shivani Sivakumar (shivani.sivakumar@bearrobotics.ai)
  *  - Hashir Zahir (hashir.zahir@bearrobotics.ai)
+ *  - Seung-Hun (Hoon) Han (seunghun.han@bearrobotics.ai)
  * --- BEAR MODIFICATION END ---
  *
  * This library is free software; you can redistribute it and/or
@@ -99,6 +102,7 @@
 #include <sensor_msgs/point_cloud_conversion.h>
 #include <spatio_temporal_voxel_layer/CheckBlindSpot.h>
 #include <spatio_temporal_voxel_layer/SaveGrid.h>
+#include <std_msgs/String.h>
 #include <std_srvs/SetBool.h>
 #include <std_srvs/Trigger.h>
 // projector
@@ -150,6 +154,7 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
   virtual void reset(void);
   virtual void activate(void);
   virtual void deactivate(void);
+  virtual void activateByMapChange();
 
   // Functions for sensor feeds
   bool GetMarkingObservations(
@@ -282,6 +287,11 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
   bool ClearRobotFootprint(std_srvs::Trigger::Request& req,
                            std_srvs::Trigger::Response& resp);
 
+  bool ClearCliffsCallback(std_srvs::Trigger::Request& req,
+                           std_srvs::Trigger::Response& resp);
+
+  void PoseResetNotifCallback(const std_msgs::String::ConstPtr& msg);
+
   // Enable/Disable callback
   bool BufferEnablerCallback(
       std_srvs::SetBool::Request& request,
@@ -315,6 +325,7 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
 
   bool _publish_voxels, _mapping_mode;
   ros::Publisher _voxel_pub;
+  ros::Publisher _cliff_voxel_pub;
   ros::Duration publish_voxel_map_period_;
   ros::Time last_publish_time_;
 
@@ -322,6 +333,8 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
   ros::ServiceServer _grid_saver;
   ros::ServiceServer _blind_spot_checker;
   ros::ServiceServer _clear_robot_footprint_server;
+  ros::ServiceServer _clear_cliffs_server;
+  ros::Subscriber _pose_reset_notif_sub;
   double _robot_x, _robot_y, _robot_yaw;
   double _hardware_robot_radius;
 

@@ -110,7 +110,7 @@ class MeasurementBuffer {
                     const std::string& global_frame,
                     const std::string& sensor_frame, const double& tf_tolerance,
                     const double& decay_acceleration, const bool& marking,
-                    const bool& clearing, int voxel_class, double voxel_size,
+                    const bool& clearing, const double& voxel_size,
                     std::unique_ptr<spatio_temporal_voxel_layer::Filter> filter,
                     const bool& enabled, const bool& clear_buffer_after_reading,
                     FrustumFactoryFactory::FrustumFactory frustrum_factory);
@@ -149,7 +149,6 @@ class MeasurementBuffer {
   std::list<observation::MeasurementReading> _observation_list;
   double _obstacle_range, _tf_tolerance;
   double _decay_acceleration, _voxel_size;
-  int _voxel_class;
   bool _marking, _clearing, _clear_buffer_after_reading, _enabled;
   std::unique_ptr<spatio_temporal_voxel_layer::Filter> _filter;
   FrustumFactoryFactory::FrustumFactory _frustrum_factory;

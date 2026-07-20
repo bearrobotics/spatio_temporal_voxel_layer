@@ -359,17 +359,3 @@ cc_ros_test(
         "@openvdb",
     ],
 )
-
-cc_ros_test(
-    name = "test_cliff_persistence",
-    size = "small",
-    srcs = ["test/test_cliff_persistence.cpp"],
-    launch_file = "test/test_cliff_persistence.test",
-    deps = [
-        ":spatio_temporal_voxel_layer_plugin",
-        ":test_utils",
-        "//third_party/ros:roscpp",
-        "@gtests//:gtest",
-        "@openvdb",
-    ],
-)

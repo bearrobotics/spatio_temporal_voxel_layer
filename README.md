@@ -106,7 +106,7 @@ rgbd_obstacle_layer:
   enabled:               true
   voxel_decay:           20     #seconds if linear, e^n if exponential
   decay_model:           0      #0=linear, 1=exponential, -1=persistent
-  voxel_size:            0.05   #meters
+  voxel_size_costmap_resolution_multiplier:            1.0    #size of a voxel (in costmap cells)
   track_unknown_space:   true   #default space is unknown
   observation_persistence: 0.0  #seconds
   max_obstacle_height:   2.0    #meters

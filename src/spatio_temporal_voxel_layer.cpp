@@ -127,7 +127,9 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
           nh, "publish_voxel_map_period"));
 
   // size of each voxel in meters
-  _voxel_size = bear::lib::ros::LoadRequiredParam<double>(nh, "voxel_size");
+  _voxel_size = layered_costmap_->getCostmap()->getResolution() *
+                bear::lib::ros::LoadRequiredParam<double>(
+                    nh, "voxel_size_costmap_resolution_multiplier");
   // 1=takes highest in layers, 0=takes current layer
   _combination_method =
       bear::lib::ros::LoadRequiredParam<int>(nh, "combination_method");
@@ -840,7 +842,8 @@ void SpatioTemporalVoxelLayer::DynamicReconfigureCallback(
   //                            ? costmap_2d::NO_INFORMATION
   //                            : costmap_2d::FREE_SPACE;
   //   setDefaultValue(default_value);
-  //   _voxel_size = config.voxel_size;
+  //   _voxel_size = config.voxel_size_costmap_resolution_multiplier *
+  //                 layered_costmap_->getCostmap()->getResolution();
   //   _voxel_decay = config.voxel_decay;
   //   _decay_model =
   //       static_cast<volume_grid::GlobalDecayModel>(config.decay_model);

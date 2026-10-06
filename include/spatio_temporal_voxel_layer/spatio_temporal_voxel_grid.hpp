@@ -266,8 +266,10 @@ class SpatioTemporalVoxelGrid {
   void InitializeGrid(void);
 
   // grid accessor methods
-  bool MarkGridPoint(const openvdb::Coord& pt, const double& value) const;
-  bool ClearGridPoint(const openvdb::Coord& pt) const;
+  bool MarkGridPoint(const openvdb::Coord& pt, double value,
+                     openvdb::DoubleGrid::Accessor& value_accessor) const;
+  bool ClearGridPoint(const openvdb::Coord& pt,
+                      openvdb::DoubleGrid::Accessor& value_accessor) const;
 
   // Check occupancy status of the grid
   bool IsGridEmpty(void) const;
@@ -283,7 +285,7 @@ class SpatioTemporalVoxelGrid {
           dynamic_obstacle_frustums);
 
   // Populate the costmap ROS api and pointcloud with a marked point
-  void PopulateCostmapAndPointcloud(const openvdb::Coord& pt);
+  void PopulateCostmapAndPointcloud(const openvdb::Vec3d& pose_world);
 
   // Utilities for tranformation
   openvdb::Vec3d WorldToIndex(const openvdb::Vec3d& coord) const;

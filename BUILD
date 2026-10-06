@@ -304,10 +304,38 @@ cc_ros_test(
 )
 
 cc_ros_test(
+    name = "test_decay_pass",
+    size = "small",
+    srcs = ["test/test_decay_pass.cpp"],
+    launch_file = "test/test_decay_pass.test",
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        ":test_utils",
+        "//third_party/ros:roscpp",
+        "@gtests//:gtest",
+        "@openvdb",
+    ],
+)
+
+cc_ros_test(
     name = "test_check_box",
     size = "small",
     srcs = ["test/test_check_box.cpp"],
     launch_file = "test/test_check_box.test",
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        ":test_utils",
+        "//third_party/ros:roscpp",
+        "@gtests//:gtest",
+        "@openvdb",
+    ],
+)
+
+cc_ros_test(
+    name = "test_mark_snapping",
+    size = "small",
+    srcs = ["test/test_mark_snapping.cpp"],
+    launch_file = "test/test_mark_snapping.test",
     deps = [
         ":spatio_temporal_voxel_layer_plugin",
         ":test_utils",

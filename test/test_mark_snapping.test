@@ -1,0 +1,6 @@
+<launch>
+    <test test-name="test_mark_snapping" pkg="spatio_temporal_voxel_layer"
+        type="test_mark_snapping"
+        bazel="ROS/external/navigation/spatio_temporal_voxel_layer/test_mark_snapping_runner">
+    </test>
+</launch>

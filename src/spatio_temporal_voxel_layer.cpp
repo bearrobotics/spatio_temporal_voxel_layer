@@ -49,6 +49,7 @@
  *  - Sensor data filtering (noise filter, frustum-based filtering)
  *  - Safety zone frustum support
  *  - Per-voxel-class obstacle policies (per-class decay and clearing)
+ *  - Multi-frame class confirmation (marked generic until promoted)
  *  - Various bug fixes and performance improvements
  *    (see git history for detailed per-commit changes)
  * Contributors:
@@ -102,6 +103,14 @@ void LoadVoxelClasses(ros::NodeHandle& nh, VoxelClassTable::Config& config) {
     VoxelClassPolicy policy;
     policy.decay_seconds = LoadRequiredParam<double>(class_nh, "decay");
     policy.priority = LoadRequiredParam<int>(class_nh, "priority");
+
+    if (class_nh.hasParam("confirmation")) {
+      ros::NodeHandle confirmation_nh(class_nh, "confirmation");
+      policy.confirmation_frames =
+          LoadRequiredParam<int>(confirmation_nh, "frames");
+      policy.confirmation_window_seconds =
+          LoadRequiredParam<double>(confirmation_nh, "window");
+    }
 
     // Every flag is required; a defaulted one could erase a cliff.
     ros::NodeHandle cleared_nh(class_nh, "cleared_by");

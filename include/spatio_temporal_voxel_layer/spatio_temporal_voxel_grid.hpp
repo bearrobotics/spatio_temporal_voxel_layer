@@ -51,6 +51,7 @@
  *  - Sensor data filtering (noise filter, frustum-based filtering)
  *  - Safety zone frustum support
  *  - Per-voxel-class obstacle policies (per-class decay and clearing)
+ *  - Multi-frame class confirmation (marked generic until promoted)
  *  - Various bug fixes and performance improvements
  *    (see git history for detailed per-commit changes)
  * Contributors:
@@ -287,6 +288,11 @@ class SpatioTemporalVoxelGrid {
                       openvdb::DoubleGrid::Accessor& value_accessor,
                       openvdb::Int32Grid::Accessor& class_accessor) const;
 
+  bool ConfirmPromotion(const openvdb::Coord& pt, const ros::Time& cloud_stamp,
+                        VoxelClass target_class,
+                        const VoxelClassPolicy& policy) const;
+  void ExpirePromotionCandidates(const ros::Time& current_cloud_stamp);
+
   // Check occupancy status of the grid
   bool IsGridEmpty(void) const;
 
@@ -317,6 +323,15 @@ class SpatioTemporalVoxelGrid {
   mutable openvdb::DoubleGrid::Ptr _grid;
   // Holds only non-generic voxels, so it is a subset of _grid.
   mutable openvdb::Int32Grid::Ptr _class_grid;
+
+  struct PromotionCandidate {
+    VoxelClass target_class = VoxelClass::kGeneric;
+    int32_t frame_count = 0;
+    ros::Time last_stamp = ros::TIME_MIN;
+  };
+  mutable std::unordered_map<openvdb::Coord, PromotionCandidate>
+      _promotion_candidates;
+
   VoxelClassTable _class_table;
   int _decay_model;
   double _background_value, _voxel_size;

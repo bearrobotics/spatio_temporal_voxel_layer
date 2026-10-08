@@ -47,6 +47,7 @@
 namespace {
 
 namespace test_utils = spatio_temporal_voxel_layer::test_utils;
+using test_utils::TestableGrid;
 using volume_grid::SpatioTemporalVoxelGrid;
 using volume_grid::VoxelClass;
 using volume_grid::VoxelClassPolicy;
@@ -132,49 +133,6 @@ std::optional<VoxelClassTable> MakeCliffTable(
   config.rows.push_back(row);
   return VoxelClassTable::Create(config);
 }
-
-class TestableGrid : public SpatioTemporalVoxelGrid {
- public:
-  using SpatioTemporalVoxelGrid::SpatioTemporalVoxelGrid;
-
-  // Not Grid::empty(), which stays false until a cleared voxel is pruned.
-  [[nodiscard]] bool IsClassGridEmpty() const {
-    return _class_grid->activeVoxelCount() == 0;
-  }
-
-  // The cloud stores float, so round the same way before indexing.
-  [[nodiscard]] openvdb::Coord CoordAt(
-      const geometry_msgs::Point& point) const {
-    const openvdb::Vec3d index =
-        WorldToIndex({static_cast<float>(point.x), static_cast<float>(point.y),
-                      static_cast<float>(point.z)});
-    return openvdb::Coord(index[0], index[1], index[2]);
-  }
-
-  [[nodiscard]] VoxelClass ClassAt(const geometry_msgs::Point& point) const {
-    return volume_grid::ToVoxelClass(
-        _class_grid->getAccessor().getValue(CoordAt(point)));
-  }
-
-  // Rewinds a mark time so a pass sees an old mark without waiting.
-  void AgeMark(const geometry_msgs::Point& point, double seconds) {
-    const openvdb::Coord coord = CoordAt(point);
-    openvdb::DoubleGrid::Accessor accessor = _grid->getAccessor();
-    accessor.setValueOn(coord, accessor.getValue(coord) - seconds);
-  }
-
-  [[nodiscard]] bool IsClassGridConsistent() const {
-    openvdb::DoubleGrid::ConstAccessor values = _grid->getConstAccessor();
-    for (openvdb::Int32Grid::ValueOnCIter cit = _class_grid->cbeginValueOn();
-         cit.test(); ++cit) {
-      if (cit.getValue() == volume_grid::ToClassId(VoxelClass::kGeneric) ||
-          !values.isValueOn(cit.getCoord())) {
-        return false;
-      }
-    }
-    return true;
-  }
-};
 
 std::unique_ptr<TestableGrid> MakeGrid(
     std::optional<VoxelClassTable> table, int decay_model,
@@ -395,7 +353,7 @@ TEST(VoxelClassGridTest, GenericRemarkDoesNotDowngradeCliff) {
 
   grid->Mark({MakeMarkingReading({mark}, VoxelClass::kGeneric)});
 
-  EXPECT_EQ(grid->ClassAt(mark), VoxelClass::kCliff);
+  EXPECT_EQ(grid->GetClassAt(mark), VoxelClass::kCliff);
   EXPECT_TRUE(grid->IsClassGridConsistent());
 }
 
@@ -404,11 +362,11 @@ TEST(VoxelClassGridTest, CliffMarkPromotesGenericVoxel) {
   auto grid =
       MakeGrid(MakeCliffTable(kDecayNever, kDecayNever), volume_grid::LINEAR);
   grid->Mark({MakeMarkingReading({mark}, VoxelClass::kGeneric)});
-  ASSERT_EQ(grid->ClassAt(mark), VoxelClass::kGeneric);
+  ASSERT_EQ(grid->GetClassAt(mark), VoxelClass::kGeneric);
 
   grid->Mark({MakeMarkingReading({mark}, VoxelClass::kCliff)});
 
-  EXPECT_EQ(grid->ClassAt(mark), VoxelClass::kCliff);
+  EXPECT_EQ(grid->GetClassAt(mark), VoxelClass::kCliff);
   EXPECT_TRUE(grid->IsClassGridConsistent());
 }
 

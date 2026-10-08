@@ -75,6 +75,9 @@ classified:
     cliff:
       decay: 120.0
       priority: 10
+      confirmation:
+        frames: 3
+        window: 1.0
       cleared_by:
         frustums: true
         dynamic_obstacles: false

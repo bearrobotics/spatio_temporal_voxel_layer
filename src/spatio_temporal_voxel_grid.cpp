@@ -49,6 +49,7 @@
  *  - Sensor data filtering (noise filter, frustum-based filtering)
  *  - Safety zone frustum support
  *  - Per-voxel-class obstacle policies (per-class decay and clearing)
+ *  - Multi-frame class confirmation (marked generic until promoted)
  *  - Various bug fixes and performance improvements
  *    (see git history for detailed per-commit changes)
  * Contributors:
@@ -71,6 +72,7 @@
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 
+#include <cmath>
 #include <spatio_temporal_voxel_layer/spatio_temporal_voxel_grid.hpp>
 
 namespace volume_grid {
@@ -572,12 +574,21 @@ void SpatioTemporalVoxelGrid::Mark(
 {
   boost::unique_lock<boost::mutex> lock(_grid_lock);
 
+  ros::Time expiry_reference_stamp = ros::TIME_MIN;
+
   // mark the grid
-  if (marking_readings.size() > 0) {
-    // tbb::parallel_do(marking_readings, *this); /*must do via merged trees*/
-    for (int i = 0; i != marking_readings.size(); i++) {
-      (*this)(marking_readings.at(i));
+  // tbb::parallel_do(marking_readings, *this); /*must do via merged trees*/
+  for (const observation::MeasurementReading& reading : marking_readings) {
+    (*this)(reading);
+
+    if (reading._marking &&
+        _class_table.GetPolicy(reading._voxel_class).confirmation_frames > 1) {
+      expiry_reference_stamp = reading._cloud->header.stamp;
     }
+  }
+
+  if (expiry_reference_stamp != ros::TIME_MIN) {
+    ExpirePromotionCandidates(expiry_reference_stamp);
   }
   return;
 }
@@ -596,9 +607,13 @@ void SpatioTemporalVoxelGrid::operator()(
   const double cur_time = ros::Time::now().toSec();
 
   const VoxelClass source_class = obs._voxel_class;
-  const int32_t source_priority = _class_table.GetPolicy(source_class).priority;
-  // An empty class grid means every voxel is generic; skip the per-point read.
-  const bool needs_class_check = !_class_grid->empty();
+  const VoxelClassPolicy& source_policy = _class_table.GetPolicy(source_class);
+  const int32_t source_priority = source_policy.priority;
+  const bool needs_confirmation = source_policy.confirmation_frames > 1;
+  const ros::Time cloud_stamp = obs._cloud->header.stamp;
+  // Only a generic source leaves the class grid empty for the whole cloud.
+  const bool needs_class_check =
+      source_class != VoxelClass::kGeneric || !_class_grid->empty();
 
   openvdb::DoubleGrid::Accessor value_accessor = _grid->getAccessor();
   openvdb::Int32Grid::Accessor class_accessor = _class_grid->getAccessor();
@@ -628,16 +643,28 @@ void SpatioTemporalVoxelGrid::operator()(
     openvdb::Vec3d mark_grid(this->WorldToIndex(openvdb::Vec3d(x, y, z)));
     const openvdb::Coord coord(mark_grid[0], mark_grid[1], mark_grid[2]);
 
-    // A lower-priority mark must not change the voxel.
+    VoxelClass current_class = VoxelClass::kGeneric;
+    int32_t current_priority = 0;
     if (needs_class_check) {
-      const VoxelClass current = ToVoxelClass(class_accessor.getValue(coord));
-      if (source_priority < _class_table.GetPolicy(current).priority) {
-        continue;
-      }
+      current_class = ToVoxelClass(class_accessor.getValue(coord));
+      current_priority = _class_table.GetPolicy(current_class).priority;
     }
 
-    if (!this->MarkClassifiedPoint(coord, cur_time, source_class,
-                                   value_accessor, class_accessor)) {
+    if (source_priority < current_priority) {
+      continue;
+    }
+
+    VoxelClass mark_class = source_class;
+    if (needs_confirmation && source_priority > current_priority &&
+        !ConfirmPromotion(coord, cloud_stamp, source_class, source_policy)) {
+      if (current_class != VoxelClass::kGeneric) {
+        continue;
+      }
+      mark_class = VoxelClass::kGeneric;
+    }
+
+    if (!this->MarkClassifiedPoint(coord, cur_time, mark_class, value_accessor,
+                                   class_accessor)) {
       ROS_WARN("Failed to mark point.");
     }
   }
@@ -723,6 +750,7 @@ bool SpatioTemporalVoxelGrid::ResetGrid(void)
   try {
     _grid->clear();
     _class_grid->clear();
+    _promotion_candidates.clear();
     if (this->IsGridEmpty()) {
       return true;
     }
@@ -739,6 +767,8 @@ void SpatioTemporalVoxelGrid::ResetGridArea(const occupany_cell& start,
 /*****************************************************************************************************************/
 {
   boost::unique_lock<boost::mutex> lock(_grid_lock);
+
+  _promotion_candidates.clear();
 
   openvdb::DoubleGrid::Accessor value_accessor = _grid->getAccessor();
   openvdb::Int32Grid::Accessor class_accessor = _class_grid->getAccessor();
@@ -781,6 +811,62 @@ bool SpatioTemporalVoxelGrid::MarkClassifiedPoint(
   }
   value_accessor.setValueOn(pt, mark_time);
   return value_accessor.getValue(pt) == mark_time;
+}
+
+/*****************************************************************************/
+bool SpatioTemporalVoxelGrid::ConfirmPromotion(
+    const openvdb::Coord& pt, const ros::Time& cloud_stamp,
+    VoxelClass target_class, const VoxelClassPolicy& policy) const
+/*****************************************************************************/
+{
+  PromotionCandidate& candidate = _promotion_candidates[pt];
+
+  const double gap_seconds =
+      std::abs((cloud_stamp - candidate.last_stamp).toSec());
+  const bool class_changed = candidate.target_class != target_class;
+  const bool gap_too_wide = gap_seconds > policy.confirmation_window_seconds;
+  if (class_changed || gap_too_wide) {
+    candidate.target_class = target_class;
+    candidate.frame_count = 0;
+  }
+
+  // The count rises once per observation.
+  if (cloud_stamp != candidate.last_stamp) {
+    ++candidate.frame_count;
+    candidate.last_stamp = cloud_stamp;
+  }
+
+  if (candidate.frame_count < policy.confirmation_frames) {
+    return false;
+  }
+  _promotion_candidates.erase(pt);
+  return true;
+}
+
+/*****************************************************************************/
+void SpatioTemporalVoxelGrid::ExpirePromotionCandidates(
+    const ros::Time& current_cloud_stamp)
+/*****************************************************************************/
+{
+  // The margin is loose on purpose: expiry only bounds memory.
+  constexpr double kMaxAgeWindowMultiplier = 2.0;
+  constexpr double kMaxAgeSlackSeconds = 1.0;
+
+  for (auto it = _promotion_candidates.begin();
+       it != _promotion_candidates.end();) {
+    const double max_age_seconds =
+        kMaxAgeWindowMultiplier *
+            _class_table.GetPolicy(it->second.target_class)
+                .confirmation_window_seconds +
+        kMaxAgeSlackSeconds;
+    const double age_seconds =
+        (current_cloud_stamp - it->second.last_stamp).toSec();
+    if (age_seconds > max_age_seconds) {
+      it = _promotion_candidates.erase(it);
+    } else {
+      ++it;
+    }
+  }
 }
 
 /*****************************************************************************/

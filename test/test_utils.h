@@ -27,8 +27,10 @@
 #define SPATIO_TEMPORAL_VOXEL_LAYER_TEST_UTILS_H_
 
 #include <geometry_msgs/Point.h>
+#include <openvdb/openvdb.h>
 #include <sensor_msgs/PointCloud2.h>
 
+#include <cstddef>
 #include <memory>
 #include <vector>
 
@@ -43,6 +45,55 @@ using geometry::FootprintClearingPrism;
 using geometry::FootprintFrustum;
 using geometry::InterSensorDecayPrism;
 using volume_grid::SpatioTemporalVoxelGrid;
+using volume_grid::VoxelClass;
+
+class TestableGrid : public SpatioTemporalVoxelGrid {
+ public:
+  using SpatioTemporalVoxelGrid::SpatioTemporalVoxelGrid;
+
+  // Not Grid::empty(), which stays false until a cleared voxel is pruned.
+  [[nodiscard]] bool IsClassGridEmpty() const {
+    return _class_grid->activeVoxelCount() == 0;
+  }
+
+  // The cloud stores float, so round the same way before indexing.
+  [[nodiscard]] openvdb::Coord GetCoordAt(
+      const geometry_msgs::Point& point) const {
+    const openvdb::Vec3d index =
+        WorldToIndex({static_cast<float>(point.x), static_cast<float>(point.y),
+                      static_cast<float>(point.z)});
+    return openvdb::Coord(index[0], index[1], index[2]);
+  }
+
+  [[nodiscard]] VoxelClass GetClassAt(const geometry_msgs::Point& point) const {
+    return volume_grid::ToVoxelClass(
+        _class_grid->getAccessor().getValue(GetCoordAt(point)));
+  }
+
+  // Rewinds a mark time so a pass sees an old mark without waiting.
+  void AgeMark(const geometry_msgs::Point& point, double seconds) {
+    const openvdb::Coord coord = GetCoordAt(point);
+    openvdb::DoubleGrid::Accessor accessor = _grid->getAccessor();
+    accessor.setValueOn(coord, accessor.getValue(coord) - seconds);
+  }
+
+  [[nodiscard]] std::size_t GetPendingPromotionCount() const {
+    return _promotion_candidates.size();
+  }
+
+  [[nodiscard]] bool IsClassGridConsistent() const {
+    openvdb::DoubleGrid::ConstAccessor values = _grid->getConstAccessor();
+    for (openvdb::Int32Grid::ValueOnCIter cit = _class_grid->cbeginValueOn();
+         cit.test(); ++cit) {
+      if (cit.getValue() == volume_grid::ToClassId(VoxelClass::kGeneric) ||
+          !values.isValueOn(cit.getCoord())) {
+        return false;
+      }
+    }
+    return true;
+  }
+};
+
 // Mock object creators - create disabled instances for testing
 std::unique_ptr<FootprintFrustum> MakeMockFootprintFrustum();
 std::unique_ptr<DynamicObstacleTracker> MakeMockDynamicObstacleTracker();

@@ -44,7 +44,17 @@ static_assert(kClassNames.size() == kVoxelClassCount,
 }  // namespace
 
 bool VoxelClassPolicy::IsValid() const {
-  return std::isfinite(decay_seconds) && decay_seconds > 0.0 && priority >= 1;
+  if (!std::isfinite(decay_seconds) || decay_seconds <= 0.0 || priority < 1 ||
+      confirmation_frames < 1) {
+    return false;
+  }
+  // A single confirmation frame is the same as no confirmation.
+  if (confirmation_frames == 1) {
+    return true;
+  }
+  // The window must be positive, and neither infinite nor NaN.
+  return std::isfinite(confirmation_window_seconds) &&
+         confirmation_window_seconds > 0.0;
 }
 
 VoxelClassTable VoxelClassTable::CreateGenericOnly(
@@ -84,11 +94,14 @@ std::optional<VoxelClassTable> VoxelClassTable::Create(const Config& config) {
     }
     if (!row.policy.IsValid()) {
       ROS_ERROR_STREAM("voxel_classes: class '"
-                       << name
-                       << "' requires priority >= 1 and a finite decay "
-                          "> 0; got priority "
-                       << row.policy.priority << ", decay "
-                       << row.policy.decay_seconds << ".");
+                       << name << "' has priority " << row.policy.priority
+                       << ", decay " << row.policy.decay_seconds
+                       << ", confirmation frames "
+                       << row.policy.confirmation_frames << ", window "
+                       << row.policy.confirmation_window_seconds
+                       << ". Requires priority >= 1, a finite decay > 0, "
+                          "frames >= 1, and a finite window > 0 when frames "
+                          "> 1.");
       return std::nullopt;
     }
     if (!seen_priorities.insert(row.policy.priority).second) {

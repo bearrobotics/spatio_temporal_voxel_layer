@@ -1,0 +1,90 @@
+# Layer configs for test_layer_voxel_class_params, keyed by layer name.
+# YAML anchors keep the shared base in one place.
+source_defaults: &source_defaults
+  topic: /unused/points
+  sensor_frame: camera
+  observation_persistence: 0.0
+  expected_update_rate: 0.0
+  data_type: PointCloud2
+  inf_is_valid: false
+  clearing: true
+  marking: true
+  decay_acceleration: 1.0
+  clear_after_reading: true
+  enabled: true
+  filter:
+    type: passthrough
+  frustrum:
+    type: 3d_camera
+    vertical_fov_angle: 1.0
+    horizontal_fov_angle: 1.2
+    min_z: 0.1
+    max_z: 5.0
+
+layer_defaults: &layer_defaults
+  observation_sources: "camera_source"
+  transform_tolerance: 0.2
+  enabled: true
+  publish_voxel_map: false
+  publish_voxel_map_period: 3.0
+  voxel_size_costmap_resolution_multiplier: 1.0
+  combination_method: 1
+  mark_threshold: 0
+  update_footprint_enabled: false
+  reset_enabled: false
+  track_unknown_space: false
+  decay_model: 0
+  voxel_decay: 15.0
+  hardware_robot_radius: 0.3
+  mapping_mode: false
+  safety_zone:
+    enable: false
+    point1: [0.0, 0.0]
+    point2: [0.1, 0.0]
+    point3: [0.0, 0.1]
+  dynamic_obstacle_clearing:
+    enable: false
+    activation_velocity_threshold: 0.1
+    min_distance_between_readings_threshold: 0.25
+    interpolation_in_future: 0.5
+    interpolation_in_past: 0.5
+    stale_time_threshold: 2.0
+    inflation_radius_factor: 1.5
+    number_of_interpolation_circles: 3
+    past_time_window: 1.0
+    random_walk_probability_limit: 0.1
+    max_obstacle_radius: 0.5
+    seconds_since_last_random_walk: 0.25
+    publish_visualization: false
+  robot_motion_clearing:
+    enable: false
+    topic: /unused/motion
+    activation_velocity_threshold: 0.1
+    min_distance_between_readings_threshold: 0.25
+    stale_time_threshold: 0.75
+    inflation_radius_factor: 1.2
+    number_of_interpolation_circles: 3
+    past_time_window: 1.0
+    publish_visualization: false
+  camera_source: *source_defaults
+
+classified:
+  <<: *layer_defaults
+  observation_sources: "camera_source cliff_source"
+  voxel_classes:
+    cliff:
+      decay: 120.0
+      priority: 10
+      cleared_by:
+        frustums: true
+        dynamic_obstacles: false
+        footprint_clear: false
+        front_blind_spot: false
+        inter_sensor_decay: false
+  cliff_source:
+    <<: *source_defaults
+    topic: /unused/cliff_points
+    voxel_class: cliff
+
+generic_only:
+  <<: *layer_defaults

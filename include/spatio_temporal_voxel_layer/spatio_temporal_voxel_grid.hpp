@@ -50,6 +50,7 @@
  *  - CheckBlindSpot and ClearRobotFootprint services
  *  - Sensor data filtering (noise filter, frustum-based filtering)
  *  - Safety zone frustum support
+ *  - Per-voxel-class obstacle policies (per-class decay and clearing)
  *  - Various bug fixes and performance improvements
  *    (see git history for detailed per-commit changes)
  * Contributors:
@@ -105,6 +106,7 @@
 #include <spatio_temporal_voxel_layer/frustum_models/three_dimensional_lidar_frustum.hpp>
 #include <spatio_temporal_voxel_layer/measurement_buffer.hpp>
 #include <spatio_temporal_voxel_layer/robot_motion_tracker.hpp>
+#include <spatio_temporal_voxel_layer/voxel_class.hpp>
 // Mutex and locks
 #include <boost/thread.hpp>
 #include <boost/thread/recursive_mutex.hpp>
@@ -126,10 +128,15 @@ struct occupany_cell {
 
 // Structure for wrapping frustum model and necessary metadata
 struct frustum_model {
-  frustum_model(std::unique_ptr<geometry::Frustum> _frustum, double _factor)
-      : frustum(std::move(_frustum)), accel_factor(_factor) {}
+  frustum_model(std::unique_ptr<geometry::Frustum> _frustum, double _factor,
+                VoxelClass _source_class)
+      : frustum(std::move(_frustum)),
+        accel_factor(_factor),
+        source_class(_source_class) {}
   std::unique_ptr<geometry::Frustum> frustum;
   const double accel_factor;
+  // A frustum only clears voxels of its own class.
+  const VoxelClass source_class;
 };
 
 // Core voxel grid structure and interface
@@ -147,7 +154,9 @@ class SpatioTemporalVoxelGrid {
       std::unique_ptr<geometry::FootprintClearingPrism>
           front_blind_spot_clearing_prism,
       std::unique_ptr<DynamicObstacleTracker> dynamic_obstacle_tracker,
-      std::unique_ptr<RobotMotionTracker> robot_motion_tracker);
+      std::unique_ptr<RobotMotionTracker> robot_motion_tracker,
+      // Omitting it builds a generic-only table from voxel_decay.
+      std::optional<VoxelClassTable> class_table = std::nullopt);
   ~SpatioTemporalVoxelGrid(void);
 
   // Core making and clearing functions
@@ -161,11 +170,13 @@ class SpatioTemporalVoxelGrid {
       std::vector<RobotMotionReading>& robot_motion_readings);
 
   /**
-   * @brief Clears all voxels within a circular area in the XY plane.
-   * @details Iterates through all active voxels in the grid and removes any
-   * voxels whose XY position falls within the specified circular region.
-   * The Z coordinate is ignored - all voxels at any height within the circular
-   * footprint are cleared. Thread-safe operation using a mutex lock.
+   * @brief Clears policy-eligible voxels within a circular area in the XY
+   * plane.
+   * @details Iterates through all active voxels in the grid and removes those
+   * whose XY position falls within the specified circular region and whose
+   * class policy has cleared_by_footprint_clear set. Voxels of other classes
+   * stay; use ResetGridArea to remove every class. The Z coordinate is
+   * ignored. Thread-safe operation using a mutex lock.
    * @param center_x Center X coordinate of the circular area in the global
    *                 frame (meters).
    * @param center_y Center Y coordinate of the circular area in the global
@@ -268,14 +279,19 @@ class SpatioTemporalVoxelGrid {
   // grid accessor methods
   bool MarkGridPoint(const openvdb::Coord& pt, double value,
                      openvdb::DoubleGrid::Accessor& value_accessor) const;
+  bool MarkClassifiedPoint(const openvdb::Coord& pt, double mark_time,
+                           VoxelClass cls,
+                           openvdb::DoubleGrid::Accessor& value_accessor,
+                           openvdb::Int32Grid::Accessor& class_accessor) const;
   bool ClearGridPoint(const openvdb::Coord& pt,
-                      openvdb::DoubleGrid::Accessor& value_accessor) const;
+                      openvdb::DoubleGrid::Accessor& value_accessor,
+                      openvdb::Int32Grid::Accessor& class_accessor) const;
 
   // Check occupancy status of the grid
   bool IsGridEmpty(void) const;
 
   // Get time information for clearing
-  double GetTemporalClearingDuration(const double& time_delta);
+  double GetTemporalClearingDuration(double time_delta, double decay_seconds);
   double GetFrustumAcceleration(const double& time_delta,
                                 const double& acceleration_factor);
   void TemporalClearAndGenerateCostmap(
@@ -299,8 +315,11 @@ class SpatioTemporalVoxelGrid {
   std::vector<LastReading> last_readings_;
 
   mutable openvdb::DoubleGrid::Ptr _grid;
+  // Holds only non-generic voxels, so it is a subset of _grid.
+  mutable openvdb::Int32Grid::Ptr _class_grid;
+  VoxelClassTable _class_table;
   int _decay_model;
-  double _background_value, _voxel_size, _voxel_decay;
+  double _background_value, _voxel_size;
   bool _pub_voxels;
   std::vector<geometry_msgs::Point32>* _grid_points;
   std::unordered_map<occupany_cell, uint>* _cost_map;

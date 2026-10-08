@@ -48,6 +48,7 @@
  *  - CheckBlindSpot and ClearRobotFootprint services
  *  - Sensor data filtering (noise filter, frustum-based filtering)
  *  - Safety zone frustum support
+ *  - Per-voxel-class obstacle policies (per-class decay and clearing)
  *  - Various bug fixes and performance improvements
  *    (see git history for detailed per-commit changes)
  * Contributors:
@@ -83,11 +84,11 @@ SpatioTemporalVoxelGrid::SpatioTemporalVoxelGrid(
     std::unique_ptr<geometry::FootprintClearingPrism>
         front_blind_spot_clearing_prism,
     std::unique_ptr<DynamicObstacleTracker> dynamic_obstacle_tracker,
-    std::unique_ptr<RobotMotionTracker> robot_motion_tracker)
+    std::unique_ptr<RobotMotionTracker> robot_motion_tracker,
+    std::optional<VoxelClassTable> class_table)
     : _background_value(background_value),
       _voxel_size(voxel_size),
       _decay_model(decay_model),
-      _voxel_decay(voxel_decay),
       _pub_voxels(pub_voxels),
       _safety_zone_frustum(std::move(safety_zone_frustum)),
       _inter_sensor_decay_prism(std::move(inter_sensor_decay_prism)),
@@ -95,6 +96,9 @@ SpatioTemporalVoxelGrid::SpatioTemporalVoxelGrid(
           std::move(front_blind_spot_clearing_prism)),
       _dynamic_obstacle_tracker(std::move(dynamic_obstacle_tracker)),
       _robot_motion_tracker(std::move(robot_motion_tracker)),
+      _class_table(class_table
+                       ? std::move(*class_table)
+                       : VoxelClassTable::CreateGenericOnly(voxel_decay)),
       _grid_points(new std::vector<geometry_msgs::Point32>),
       _cost_map(new std::unordered_map<occupany_cell, uint>),
       _nh()
@@ -139,6 +143,11 @@ void SpatioTemporalVoxelGrid::InitializeGrid(void)
   _grid->insertMeta("Voxel Size", openvdb::FloatMetadata(_voxel_size));
   _grid->setGridClass(openvdb::GRID_LEVEL_SET);
 
+  // Shares _grid's transform so a voxel maps to the same index in both.
+  _class_grid = openvdb::Int32Grid::create(ToClassId(VoxelClass::kGeneric));
+  _class_grid->setTransform(_grid->transform().copy());
+  _class_grid->setName("SpatioTemporalVoxelClass");
+
   _frustum_viz_pub = _nh.advertise<visualization_msgs::MarkerArray>(
       "/spatio_temporal_voxel_layer/frustums", 1);
   return;
@@ -156,7 +165,9 @@ void SpatioTemporalVoxelGrid::ClearCircularArea(double center_x,
   boost::unique_lock<boost::mutex> lock(_grid_lock);
 
   const double radius_sq = radius * radius;
+  const bool needs_class_check = !_class_grid->empty();
   openvdb::DoubleGrid::Accessor value_accessor = _grid->getAccessor();
+  openvdb::Int32Grid::Accessor class_accessor = _class_grid->getAccessor();
   openvdb::DoubleGrid::ValueOnCIter cit_grid = _grid->cbeginValueOn();
   for (; cit_grid.test(); ++cit_grid) {
     const openvdb::Coord pt_index(cit_grid.getCoord());
@@ -165,10 +176,17 @@ void SpatioTemporalVoxelGrid::ClearCircularArea(double center_x,
     const double dx = pose_world.x() - center_x;
     const double dy = pose_world.y() - center_y;
     const double distance_sq = dx * dx + dy * dy;
-
-    if (distance_sq <= radius_sq) {
-      ClearGridPoint(pt_index, value_accessor);
+    if (distance_sq > radius_sq) {
+      continue;
     }
+
+    // Class lookup only for voxels actually inside the circle.
+    if (needs_class_check &&
+        !_class_table.GetPolicy(ToVoxelClass(class_accessor.getValue(pt_index)))
+             .cleared_by_footprint_clear) {
+      continue;
+    }
+    ClearGridPoint(pt_index, value_accessor, class_accessor);
   }
 }
 
@@ -249,8 +267,8 @@ void SpatioTemporalVoxelGrid::ClearFrustums(
       visualization_msgs::MarkerArray frustum_marker;
       frustum->GetVisualizationMarker(frustum_marker);
       AddVisualizationMarker(reading._sensor_name, frustum_marker);
-      obs_frustums.emplace_back(std::move(frustum),
-                                reading._decay_acceleration);
+      obs_frustums.emplace_back(std::move(frustum), reading._decay_acceleration,
+                                reading._voxel_class);
       UpdateLastReadings(reading);
     }
     if (!_frustum_markers.markers.empty()) {
@@ -308,69 +326,88 @@ void SpatioTemporalVoxelGrid::TemporalClearAndGenerateCostmap(
   // sample time once for all clearing readings
   const double cur_time = ros::Time::now().toSec();
 
+  // An empty class grid means every voxel is generic; skip the per-voxel read.
+  const bool needs_class_check = !_class_grid->empty();
+
   // check each point in the grid for inclusion in a frustum
   openvdb::DoubleGrid::Accessor value_accessor = _grid->getAccessor();
+  openvdb::Int32Grid::Accessor class_accessor = _class_grid->getAccessor();
   openvdb::DoubleGrid::ValueOnCIter cit_grid = _grid->cbeginValueOn();
   for (cit_grid; cit_grid.test(); ++cit_grid) {
     const openvdb::Coord pt_index(cit_grid.getCoord());
     const openvdb::Vec3d pose_world = this->IndexToWorld(pt_index);
+    const VoxelClass cls = needs_class_check
+                               ? ToVoxelClass(class_accessor.getValue(pt_index))
+                               : VoxelClass::kGeneric;
+    const VoxelClassPolicy& policy = _class_table.GetPolicy(cls);
 
-    std::vector<frustum_model>::iterator frustum_it = frustums.begin();
     bool frustum_cycle = false;
     bool cleared_point = false;
 
     const double time_since_marking = cur_time - cit_grid.getValue();
     const double base_duration_to_decay =
-        GetTemporalClearingDuration(time_since_marking);
+        GetTemporalClearingDuration(time_since_marking, policy.decay_seconds);
 
-    for (frustum_it; frustum_it != frustums.end(); ++frustum_it) {
-      if (!frustum_it->frustum) {
-        continue;
-      }
+    if (policy.cleared_by_frustums) {
+      for (std::vector<frustum_model>::iterator frustum_it = frustums.begin();
+           frustum_it != frustums.end(); ++frustum_it) {
+        if (!frustum_it->frustum) {
+          continue;
+        }
+        // A frustum only clears voxels of its own class.
+        if (frustum_it->source_class != cls) {
+          continue;
+        }
 
-      if (frustum_it->frustum->IsInside(pose_world)) {
-        frustum_cycle = true;
+        if (frustum_it->frustum->IsInside(pose_world)) {
+          frustum_cycle = true;
 
-        const double frustum_acceleration = GetFrustumAcceleration(
-            time_since_marking, frustum_it->accel_factor);
+          const double frustum_acceleration = GetFrustumAcceleration(
+              time_since_marking, frustum_it->accel_factor);
 
-        const double time_until_decay =
-            base_duration_to_decay - frustum_acceleration;
-        if (time_until_decay < 0.) {
-          // expired by acceleration
-          cleared_point = true;
-          if (!this->ClearGridPoint(pt_index, value_accessor)) {
-            ROS_WARN_THROTTLE(5.0, "Failed to clear point.");
+          const double time_until_decay =
+              base_duration_to_decay - frustum_acceleration;
+          if (time_until_decay < 0.) {
+            // expired by acceleration
+            cleared_point = true;
+            if (!this->ClearGridPoint(pt_index, value_accessor,
+                                      class_accessor)) {
+              ROS_WARN_THROTTLE(5.0, "Failed to clear point.");
+            }
+            break;
+          } else {
+            const double updated_mark =
+                cit_grid.getValue() - frustum_acceleration;
+            if (!this->MarkGridPoint(pt_index, updated_mark, value_accessor)) {
+              ROS_WARN("Failed to update mark.");
+            }
+            break;
           }
-          break;
-        } else {
-          const double updated_mark =
-              cit_grid.getValue() - frustum_acceleration;
-          if (!this->MarkGridPoint(pt_index, updated_mark, value_accessor)) {
-            ROS_WARN("Failed to update mark.");
-          }
-          break;
         }
       }
     }
 
-    // Check if the point is in a dynamic obstacle clearing frustum
-    for (const std::unique_ptr<geometry::IClearingFrustum>& frustum :
-         dynamic_obstacle_frustums) {
-      if (frustum->IsInside(pose_world)) {
-        ROS_WARN_THROTTLE(10, "CLEARED DYNAMIC POINT:Point: [%f, %f, %f]",
-                          pose_world[0], pose_world[1], pose_world[2]);
-        frustum_cycle = true;
-        cleared_point = true;
-        if (!this->ClearGridPoint(pt_index, value_accessor)) {
-          ROS_WARN_THROTTLE(5.0, "Failed to clear point.");
+    // Check if the point is in a dynamic obstacle clearing frustum.
+    // dynamic_obstacle_frustums also holds where other robots have driven.
+    if (policy.cleared_by_dynamic_obstacles) {
+      for (const std::unique_ptr<geometry::IClearingFrustum>& frustum :
+           dynamic_obstacle_frustums) {
+        if (frustum->IsInside(pose_world)) {
+          ROS_WARN_THROTTLE(10, "CLEARED DYNAMIC POINT:Point: [%f, %f, %f]",
+                            pose_world[0], pose_world[1], pose_world[2]);
+          frustum_cycle = true;
+          cleared_point = true;
+          if (!this->ClearGridPoint(pt_index, value_accessor, class_accessor)) {
+            ROS_WARN_THROTTLE(5.0, "Failed to clear point.");
+          }
+          break;
         }
-        break;
       }
     }
 
     // Accelerate decay for voxels in the inter-sensor blind spot
-    if (!cleared_point && !frustum_cycle && _inter_sensor_decay_prism &&
+    if (!cleared_point && !frustum_cycle &&
+        policy.decays_in_inter_sensor_prism && _inter_sensor_decay_prism &&
         _inter_sensor_decay_prism->IsInside(pose_world)) {
       frustum_cycle = true;
 
@@ -382,7 +419,7 @@ void SpatioTemporalVoxelGrid::TemporalClearAndGenerateCostmap(
           base_duration_to_decay - inter_sensor_acceleration;
       if (time_until_decay < 0.) {
         cleared_point = true;
-        if (!this->ClearGridPoint(pt_index, value_accessor)) {
+        if (!this->ClearGridPoint(pt_index, value_accessor, class_accessor)) {
           ROS_WARN("Failed to clear point.");
         }
       } else {
@@ -394,11 +431,12 @@ void SpatioTemporalVoxelGrid::TemporalClearAndGenerateCostmap(
       }
     }
 
-    if (!cleared_point && _front_blind_spot_clearing_prism &&
+    if (!cleared_point && policy.cleared_by_front_blind_spot &&
+        _front_blind_spot_clearing_prism &&
         _front_blind_spot_clearing_prism->IsInside(pose_world)) {
       frustum_cycle = true;
       cleared_point = true;
-      if (!this->ClearGridPoint(pt_index, value_accessor)) {
+      if (!this->ClearGridPoint(pt_index, value_accessor, class_accessor)) {
         ROS_WARN_THROTTLE(5.0, "Failed to clear point.");
       }
     }
@@ -412,7 +450,7 @@ void SpatioTemporalVoxelGrid::TemporalClearAndGenerateCostmap(
       } else if (base_duration_to_decay < 0.) {
         // expired by temporal clearing
         cleared_point = true;
-        if (!this->ClearGridPoint(pt_index, value_accessor)) {
+        if (!this->ClearGridPoint(pt_index, value_accessor, class_accessor)) {
           ROS_WARN_THROTTLE(5.0, "Failed to clear point.");
         }
       }
@@ -428,6 +466,7 @@ void SpatioTemporalVoxelGrid::TemporalClearAndGenerateCostmap(
 
   // free memory taken by expired voxels
   _grid->pruneGrid();
+  _class_grid->pruneGrid();
 }
 
 /*****************************************************************************/
@@ -548,37 +587,58 @@ void SpatioTemporalVoxelGrid::operator()(
     const observation::MeasurementReading& obs) const
 /*****************************************************************************/
 {
-  if (obs._marking) {
-    float mark_range_2 = obs._obstacle_range_in_m * obs._obstacle_range_in_m;
-    const double cur_time = ros::Time::now().toSec();
+  if (!obs._marking) {
+    return;
+  }
 
-    openvdb::DoubleGrid::Accessor value_accessor = _grid->getAccessor();
+  const float mark_range_2 =
+      obs._obstacle_range_in_m * obs._obstacle_range_in_m;
+  const double cur_time = ros::Time::now().toSec();
 
-    const sensor_msgs::PointCloud2& cloud = *(obs._cloud);
-    sensor_msgs::PointCloud2ConstIterator<float> iter_x(cloud, "x");
-    sensor_msgs::PointCloud2ConstIterator<float> iter_y(cloud, "y");
-    sensor_msgs::PointCloud2ConstIterator<float> iter_z(cloud, "z");
+  const VoxelClass source_class = obs._voxel_class;
+  const int32_t source_priority = _class_table.GetPolicy(source_class).priority;
+  // An empty class grid means every voxel is generic; skip the per-point read.
+  const bool needs_class_check = !_class_grid->empty();
 
-    for (iter_x, iter_y, iter_z; iter_x != iter_x.end();
-         ++iter_x, ++iter_y, ++iter_z) {
-      float distance_2 = (*iter_x - obs._origin.x) * (*iter_x - obs._origin.x) +
-                         (*iter_y - obs._origin.y) * (*iter_y - obs._origin.y) +
-                         (*iter_z - obs._origin.z) * (*iter_z - obs._origin.z);
-      if (distance_2 > mark_range_2 || distance_2 < 0.0001) {
+  openvdb::DoubleGrid::Accessor value_accessor = _grid->getAccessor();
+  openvdb::Int32Grid::Accessor class_accessor = _class_grid->getAccessor();
+
+  const sensor_msgs::PointCloud2& cloud = *(obs._cloud);
+  sensor_msgs::PointCloud2ConstIterator<float> iter_x(cloud, "x");
+  sensor_msgs::PointCloud2ConstIterator<float> iter_y(cloud, "y");
+  sensor_msgs::PointCloud2ConstIterator<float> iter_z(cloud, "z");
+
+  // A point this close to the sensor origin is invalid.
+  constexpr double kMinMarkingDistance = 0.01;  // meters
+
+  for (iter_x, iter_y, iter_z; iter_x != iter_x.end();
+       ++iter_x, ++iter_y, ++iter_z) {
+    float distance_2 = (*iter_x - obs._origin.x) * (*iter_x - obs._origin.x) +
+                       (*iter_y - obs._origin.y) * (*iter_y - obs._origin.y) +
+                       (*iter_z - obs._origin.z) * (*iter_z - obs._origin.z);
+    if (distance_2 > mark_range_2 ||
+        distance_2 < kMinMarkingDistance * kMinMarkingDistance) {
+      continue;
+    }
+
+    double x = *iter_x < 0 ? *iter_x - _voxel_size : *iter_x;
+    double y = *iter_y < 0 ? *iter_y - _voxel_size : *iter_y;
+    double z = *iter_z < 0 ? *iter_z - _voxel_size : *iter_z;
+
+    openvdb::Vec3d mark_grid(this->WorldToIndex(openvdb::Vec3d(x, y, z)));
+    const openvdb::Coord coord(mark_grid[0], mark_grid[1], mark_grid[2]);
+
+    // A lower-priority mark must not change the voxel.
+    if (needs_class_check) {
+      const VoxelClass current = ToVoxelClass(class_accessor.getValue(coord));
+      if (source_priority < _class_table.GetPolicy(current).priority) {
         continue;
       }
+    }
 
-      double x = *iter_x < 0 ? *iter_x - _voxel_size : *iter_x;
-      double y = *iter_y < 0 ? *iter_y - _voxel_size : *iter_y;
-      double z = *iter_z < 0 ? *iter_z - _voxel_size : *iter_z;
-
-      openvdb::Vec3d mark_grid(this->WorldToIndex(openvdb::Vec3d(x, y, z)));
-
-      if (!this->MarkGridPoint(
-              openvdb::Coord(mark_grid[0], mark_grid[1], mark_grid[2]),
-              cur_time, value_accessor)) {
-        ROS_WARN("Failed to mark point.");
-      }
+    if (!this->MarkClassifiedPoint(coord, cur_time, source_class,
+                                   value_accessor, class_accessor)) {
+      ROS_WARN("Failed to mark point.");
     }
   }
   return;
@@ -594,18 +654,18 @@ SpatioTemporalVoxelGrid::GetFlattenedCostmap()
 
 /*****************************************************************************/
 double SpatioTemporalVoxelGrid::GetTemporalClearingDuration(
-    const double& time_delta)
+    double time_delta, double decay_seconds)
 /*****************************************************************************/
 {
-  // use configurable model to get desired decay time
+  // The decay model is global; only the duration is per class.
   if (_decay_model == 0)  // linear
   {
-    return _voxel_decay - time_delta;
+    return decay_seconds - time_delta;
   } else if (_decay_model == 1)  // exponential
   {
-    return _voxel_decay * std::exp(-time_delta);
+    return decay_seconds * std::exp(-time_delta);
   }
-  return _voxel_decay;  // PERSISTENT
+  return decay_seconds;  // PERSISTENT
 }
 
 /*****************************************************************************/
@@ -662,6 +722,7 @@ bool SpatioTemporalVoxelGrid::ResetGrid(void)
   // clear the voxel grid
   try {
     _grid->clear();
+    _class_grid->clear();
     if (this->IsGridEmpty()) {
       return true;
     }
@@ -680,6 +741,7 @@ void SpatioTemporalVoxelGrid::ResetGridArea(const occupany_cell& start,
   boost::unique_lock<boost::mutex> lock(_grid_lock);
 
   openvdb::DoubleGrid::Accessor value_accessor = _grid->getAccessor();
+  openvdb::Int32Grid::Accessor class_accessor = _class_grid->getAccessor();
   openvdb::DoubleGrid::ValueOnCIter cit_grid = _grid->cbeginValueOn();
   for (cit_grid; cit_grid.test(); ++cit_grid) {
     const openvdb::Coord pt_index(cit_grid.getCoord());
@@ -690,7 +752,7 @@ void SpatioTemporalVoxelGrid::ResetGridArea(const occupany_cell& start,
     const bool in_range = in_x_range && in_y_range;
 
     if (in_range == invert_area) {
-      ClearGridPoint(pt_index, value_accessor);
+      ClearGridPoint(pt_index, value_accessor, class_accessor);
     }
   }
 }
@@ -707,16 +769,33 @@ bool SpatioTemporalVoxelGrid::MarkGridPoint(
 }
 
 /*****************************************************************************/
-bool SpatioTemporalVoxelGrid::ClearGridPoint(
-    const openvdb::Coord& pt,
-    openvdb::DoubleGrid::Accessor& value_accessor) const
+bool SpatioTemporalVoxelGrid::MarkClassifiedPoint(
+    const openvdb::Coord& pt, double mark_time, VoxelClass cls,
+    openvdb::DoubleGrid::Accessor& value_accessor,
+    openvdb::Int32Grid::Accessor& class_accessor) const
 /*****************************************************************************/
 {
-  // clearing the OpenVDB set
+  // Generic is the background, so storing it is redundant.
+  if (cls != VoxelClass::kGeneric) {
+    class_accessor.setValueOn(pt, ToClassId(cls));
+  }
+  value_accessor.setValueOn(pt, mark_time);
+  return value_accessor.getValue(pt) == mark_time;
+}
+
+/*****************************************************************************/
+bool SpatioTemporalVoxelGrid::ClearGridPoint(
+    const openvdb::Coord& pt, openvdb::DoubleGrid::Accessor& value_accessor,
+    openvdb::Int32Grid::Accessor& class_accessor) const
+/*****************************************************************************/
+{
   if (value_accessor.isValueOn(pt)) {
     value_accessor.setValueOff(pt, _background_value);
   }
-  return !value_accessor.isValueOn(pt);
+  if (class_accessor.isValueOn(pt)) {
+    class_accessor.setValueOff(pt, ToClassId(VoxelClass::kGeneric));
+  }
+  return !value_accessor.isValueOn(pt) && !class_accessor.isValueOn(pt);
 }
 
 /*****************************************************************************/

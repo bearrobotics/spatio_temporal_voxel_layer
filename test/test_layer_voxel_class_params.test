@@ -1,0 +1,9 @@
+<launch>
+    <test test-name="test_layer_voxel_class_params" pkg="spatio_temporal_voxel_layer"
+          type="test_layer_voxel_class_params"
+          bazel="ROS/external/navigation/spatio_temporal_voxel_layer/test_layer_voxel_class_params_runner"
+          time-limit="60">
+        <rosparam command="load" ns="/stvl_layer_params_test"
+                  file="ROS/external/navigation/spatio_temporal_voxel_layer/test/test_layer_voxel_class_params.yaml" />
+    </test>
+</launch>

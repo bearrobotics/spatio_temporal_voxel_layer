@@ -47,10 +47,12 @@
  *  - CheckBlindSpot and ClearRobotFootprint services
  *  - Sensor data filtering (noise filter, frustum-based filtering)
  *  - Safety zone frustum support
+ *  - Per-voxel-class obstacle policies (per-class decay and clearing)
  *  - Various bug fixes and performance improvements
  *    (see git history for detailed per-commit changes)
  * Contributors:
  *  - Vincent Benenati (vincent.benenati@bearrobotics.ai)
+ *  - Seung-Hun (Hoon) Han (seunghun.han@bearrobotics.ai)
  * --- BEAR MODIFICATION END ---
  *
  * This library is free software; you can redistribute it and/or
@@ -69,8 +71,9 @@
 
 // measurement structs
 #include <spatio_temporal_voxel_layer/measurement_reading.h>
-// PCL
 
+#include <spatio_temporal_voxel_layer/voxel_class.hpp>
+// PCL
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl_ros/transforms.h>
 // STL
@@ -110,7 +113,8 @@ class MeasurementBuffer {
                     const std::string& global_frame,
                     const std::string& sensor_frame, const double& tf_tolerance,
                     const double& decay_acceleration, const bool& marking,
-                    const bool& clearing, const double& voxel_size,
+                    const bool& clearing, volume_grid::VoxelClass voxel_class,
+                    double voxel_size,
                     std::unique_ptr<spatio_temporal_voxel_layer::Filter> filter,
                     const bool& enabled, const bool& clear_buffer_after_reading,
                     FrustumFactoryFactory::FrustumFactory frustrum_factory);
@@ -149,6 +153,7 @@ class MeasurementBuffer {
   std::list<observation::MeasurementReading> _observation_list;
   double _obstacle_range, _tf_tolerance;
   double _decay_acceleration, _voxel_size;
+  volume_grid::VoxelClass _voxel_class;
   bool _marking, _clearing, _clear_buffer_after_reading, _enabled;
   std::unique_ptr<spatio_temporal_voxel_layer::Filter> _filter;
   FrustumFactoryFactory::FrustumFactory _frustrum_factory;

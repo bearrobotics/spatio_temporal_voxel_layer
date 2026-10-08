@@ -48,6 +48,7 @@
  *  - CheckBlindSpot and ClearRobotFootprint services
  *  - Sensor data filtering (noise filter, frustum-based filtering)
  *  - Safety zone frustum support
+ *  - Per-voxel-class obstacle policies (per-class decay and clearing)
  *  - Various bug fixes and performance improvements
  *    (see git history for detailed per-commit changes)
  * Contributors:
@@ -70,12 +71,56 @@
 
 #include "spatio_temporal_voxel_layer/spatio_temporal_voxel_layer.hpp"
 
+#include <cstddef>
+#include <optional>
+#include <string>
+
 #include "bearlib/ros/param_loader.h"
 #include "spatio_temporal_voxel_layer/filter_factory.h"
 #include "spatio_temporal_voxel_layer/robot_motion_tracker.hpp"
-#include "spatio_temporal_voxel_layer/spatio_temporal_voxel_layer.hpp"
 
 namespace spatio_temporal_voxel_layer {
+
+namespace {
+
+using volume_grid::VoxelClass;
+using volume_grid::VoxelClassPolicy;
+using volume_grid::VoxelClassTable;
+
+void LoadVoxelClasses(ros::NodeHandle& nh, VoxelClassTable::Config& config) {
+  using bear::lib::ros::LoadRequiredParam;
+
+  // Generic is implicit, so it is never configured.
+  for (std::size_t i = 1; i < volume_grid::kVoxelClassCount; ++i) {
+    const VoxelClass cls = static_cast<VoxelClass>(i);
+    const std::string ns = "voxel_classes/" + volume_grid::ToClassName(cls);
+    if (!nh.hasParam(ns)) {
+      continue;
+    }
+    ros::NodeHandle class_nh(nh, ns);
+
+    VoxelClassPolicy policy;
+    policy.decay_seconds = LoadRequiredParam<double>(class_nh, "decay");
+    policy.priority = LoadRequiredParam<int>(class_nh, "priority");
+
+    // Every flag is required; a defaulted one could erase a cliff.
+    ros::NodeHandle cleared_nh(class_nh, "cleared_by");
+    policy.cleared_by_frustums =
+        LoadRequiredParam<bool>(cleared_nh, "frustums");
+    policy.cleared_by_dynamic_obstacles =
+        LoadRequiredParam<bool>(cleared_nh, "dynamic_obstacles");
+    policy.cleared_by_footprint_clear =
+        LoadRequiredParam<bool>(cleared_nh, "footprint_clear");
+    policy.cleared_by_front_blind_spot =
+        LoadRequiredParam<bool>(cleared_nh, "front_blind_spot");
+    policy.decays_in_inter_sensor_prism =
+        LoadRequiredParam<bool>(cleared_nh, "inter_sensor_decay");
+
+    config.rows.push_back({cls, policy});
+  }
+}
+
+}  // namespace
 
 /*****************************************************************************/
 SpatioTemporalVoxelLayer::SpatioTemporalVoxelLayer(void)
@@ -153,6 +198,22 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
   _decay_model = static_cast<volume_grid::GlobalDecayModel>(decay_model_int);
   // decay param
   _voxel_decay = bear::lib::ros::LoadRequiredParam<double>(nh, "voxel_decay");
+
+  volume_grid::VoxelClassTable::Config class_config;
+  class_config.generic_decay_seconds = _voxel_decay;
+  LoadVoxelClasses(nh, class_config);
+  std::optional<volume_grid::VoxelClassTable> class_table =
+      volume_grid::VoxelClassTable::Create(class_config);
+  if (!class_table) {
+    ROS_FATAL("Failed to build voxel class table; see voxel_classes errors.");
+    std::terminate();
+  }
+  if (!class_config.rows.empty() && _decay_model != volume_grid::LINEAR &&
+      _decay_model != volume_grid::EXPONENTIAL) {
+    ROS_WARN(
+        "voxel_classes is configured but decay_model is not LINEAR or "
+        "EXPONENTIAL; per-class decay durations will be ignored.");
+  }
 
   // Load hardware robot radius for footprint clearing
   _hardware_robot_radius =
@@ -276,7 +337,8 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
       _publish_voxels, std::move(safety_zone_frustum),
       std::move(inter_sensor_decay_prism),
       std::move(front_blind_spot_clearing_prism),
-      std::move(dynamic_obstacle_tracker), std::move(robot_motion_tracker));
+      std::move(dynamic_obstacle_tracker), std::move(robot_motion_tracker),
+      class_table);
   matchSize();
   current_ = true;
   _blind_spot_checker = nh.advertiseService(
@@ -360,12 +422,27 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
       source_node.getParam(obstacle_range_param_name, obstacle_range);
     }
 
+    // A clearing source only clears voxels of its own class.
+    const std::string voxel_class_str =
+        bear::lib::ros::LoadOptionalParam<std::string>(source_node,
+                                                       "voxel_class")
+            .value_or("generic");
+    const std::optional<volume_grid::VoxelClass> voxel_class =
+        volume_grid::ParseVoxelClass(voxel_class_str);
+    if (!voxel_class || !class_table->IsConfigured(*voxel_class)) {
+      ROS_FATAL_STREAM("Source '" << source << "': voxel_class '"
+                                  << voxel_class_str
+                                  << "' must be 'generic' or a configured "
+                                     "class.");
+      std::terminate();
+    }
+
     // create an observation buffer
     _observation_buffers.push_back(boost::shared_ptr<buffer::MeasurementBuffer>(
         new buffer::MeasurementBuffer(
             topic, observation_keep_time, expected_update_rate, obstacle_range,
             tf_buffer_, _global_frame, sensor_frame, transform_tolerance,
-            decay_acceleration, marking, clearing, _voxel_size,
+            decay_acceleration, marking, clearing, *voxel_class, _voxel_size,
             std::move(filter), enabled, clear_after_reading,
             frustrum_factory)));
 

@@ -79,6 +79,7 @@ cc_binary(
         "src/spatio_temporal_voxel_grid.cpp",
         "src/spatio_temporal_voxel_layer.cpp",
         "src/vdb2pc.cpp",
+        "src/voxel_class.cpp",
     ] + glob([
         "include/spatio_temporal_voxel_layer/**/*.h",
         "include/spatio_temporal_voxel_layer/**/*.hpp",
@@ -342,6 +343,50 @@ cc_ros_test(
         "//third_party/ros:roscpp",
         "@gtests//:gtest",
         "@openvdb",
+    ],
+)
+
+cc_ros_test(
+    name = "test_class_persistence",
+    size = "small",
+    srcs = ["test/test_class_persistence.cpp"],
+    launch_file = "test/test_class_persistence.test",
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        ":test_utils",
+        "//third_party/ros:roscpp",
+        "@eigen",
+        "@gtests//:gtest",
+        "@openvdb",
+    ],
+)
+
+cc_ros_test(
+    name = "test_measurement_buffer",
+    size = "small",
+    srcs = ["test/test_measurement_buffer.cpp"],
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        ":test_utils",
+        "//third_party/ros:cc_geometry_msgs",
+        "//third_party/ros:cc_sensor_msgs",
+        "//third_party/ros:roscpp",
+        "@gtests//:gtest",
+        "@ros_geometry2//:tf2_ros",
+    ],
+)
+
+cc_ros_test(
+    name = "test_layer_voxel_class_params",
+    size = "small",
+    srcs = ["test/test_layer_voxel_class_params.cpp"],
+    data = ["test/test_layer_voxel_class_params.yaml"],
+    launch_file = "test/test_layer_voxel_class_params.test",
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        "//ROS/external/navigation/costmap_2d",
+        "//third_party/ros:roscpp",
+        "@gtests//:gtest",
     ],
 )
 

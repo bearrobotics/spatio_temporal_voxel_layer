@@ -300,6 +300,8 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
   void PublishBlindSpotPoint(const std::optional<openvdb::Vec3d>& world_coord);
 
   laser_geometry::LaserProjection _laser_projector;
+  tf2_ros::Buffer tf_buffer_;
+  tf2_ros::TransformListener tf_listener_{tf_buffer_};
   std::vector<boost::shared_ptr<message_filters::SubscriberBase> >
       _observation_subscribers;
   std::vector<boost::shared_ptr<tf2_ros::MessageFilterBase> >
@@ -309,9 +311,7 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
   std::vector<boost::shared_ptr<buffer::MeasurementBuffer> > _marking_buffers;
   std::vector<boost::shared_ptr<buffer::MeasurementBuffer> > _clearing_buffers;
   std::vector<ros::ServiceServer> _buffer_enabler_servers;
-  dynamicReconfigureServerType* _dynamic_reconfigure_server;
-  tf2_ros::Buffer tf_buffer_;
-  tf2_ros::TransformListener tf_listener_{tf_buffer_};
+  dynamicReconfigureServerType* _dynamic_reconfigure_server = nullptr;
 
   bool _publish_voxels, _mapping_mode;
   ros::Publisher _voxel_pub;
@@ -334,7 +334,7 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
   bool _update_footprint_enabled, _enabled, _reset_enabled;
   std::vector<geometry_msgs::Point> _transformed_footprint;
   std::vector<observation::MeasurementReading> _static_observations;
-  volume_grid::SpatioTemporalVoxelGrid* _voxel_grid;
+  volume_grid::SpatioTemporalVoxelGrid* _voxel_grid = nullptr;
   boost::recursive_mutex _voxel_grid_lock;
   std::vector<DynamicObstacleReading> _dynamic_obstacle_readings;
   std::mutex _dynamic_obstacle_lock;

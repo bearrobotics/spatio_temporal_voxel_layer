@@ -48,10 +48,12 @@
  *  - CheckBlindSpot and ClearRobotFootprint services
  *  - Sensor data filtering (noise filter, frustum-based filtering)
  *  - Safety zone frustum support
+ *  - Per-voxel-class obstacle policies (per-class decay and clearing)
  *  - Various bug fixes and performance improvements
  *    (see git history for detailed per-commit changes)
  * Contributors:
  *  - Vincent Benenati (vincent.benenati@bearrobotics.ai)
+ *  - Seung-Hun (Hoon) Han (seunghun.han@bearrobotics.ai)
  * --- BEAR MODIFICATION END ---
  *
  * This library is free software; you can redistribute it and/or
@@ -75,6 +77,7 @@
 #include <memory>
 
 #include "spatio_temporal_voxel_layer/frustum_factory.h"
+#include "spatio_temporal_voxel_layer/voxel_class.hpp"
 
 namespace observation {
 
@@ -118,6 +121,7 @@ struct MeasurementReading {
         _clearing(obs._clearing),
         _orientation(obs._orientation),
         _decay_acceleration(obs._decay_acceleration),
+        _voxel_class(obs._voxel_class),
         _frustrum_factory(obs._frustrum_factory) {}
 
   geometry_msgs::Point _origin;
@@ -128,6 +132,7 @@ struct MeasurementReading {
   double _marking;
   double _clearing;
   double _decay_acceleration;
+  volume_grid::VoxelClass _voxel_class = volume_grid::VoxelClass::kGeneric;
   FrustumFactoryFactory::FrustumFactory _frustrum_factory;
 };
 

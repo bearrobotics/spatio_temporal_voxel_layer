@@ -1,0 +1,15 @@
+<launch>
+    <test test-name="test_class_persistence" pkg="spatio_temporal_voxel_layer"
+          type="test_class_persistence"
+          bazel="ROS/external/navigation/spatio_temporal_voxel_layer/test_class_persistence_runner"
+          time-limit="60">
+        <rosparam command="load" ns="/class_persistence_test">
+            frustum:
+                type: 3d_camera
+                vertical_fov_angle: 1.0
+                horizontal_fov_angle: 1.2
+                min_z: 0.1
+                max_z: 5.0
+        </rosparam>
+    </test>
+</launch>

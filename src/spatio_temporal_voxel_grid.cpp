@@ -50,6 +50,9 @@
  *  - Safety zone frustum support
  *  - Per-voxel-class obstacle policies (per-class decay and clearing)
  *  - Multi-frame class confirmation (marked generic until promoted)
+ *  - Per-class voxel point cloud topics
+ *  - ClearClassVoxels service (removes every voxel of one class)
+ *  - Voxel grid wipe on pose reset or map change
  *  - Various bug fixes and performance improvements
  *    (see git history for detailed per-commit changes)
  * Contributors:
@@ -228,15 +231,15 @@ void SpatioTemporalVoxelGrid::ClearFrustums(
     _front_blind_spot_clearing_prism->PublishVisualization();
   }
 
-  // accelerate the decay of voxels interior to the frustum
+  _grid_points->clear();
+  for (std::vector<geometry_msgs::Point32>& points : _class_points) {
+    points.clear();
+  }
+  _cost_map->clear();
+
   if (this->IsGridEmpty()) {
-    _grid_points->clear();
-    _cost_map->clear();
     return;
   }
-
-  _grid_points->clear();
-  _cost_map->clear();
 
   std::vector<frustum_model> obs_frustums;
   std::vector<std::unique_ptr<geometry::IClearingFrustum>>
@@ -462,7 +465,7 @@ void SpatioTemporalVoxelGrid::TemporalClearAndGenerateCostmap(
       cleared_cells.insert(occupany_cell(pose_world[0], pose_world[1]));
     } else {
       // if here, we can add to costmap and PC2
-      PopulateCostmapAndPointcloud(pose_world);
+      PopulateCostmapAndPointcloud(pose_world, cls);
     }
   }
 
@@ -545,16 +548,23 @@ std::optional<openvdb::Vec3d> SpatioTemporalVoxelGrid::CheckBox(
 
 /*****************************************************************************/
 void SpatioTemporalVoxelGrid::PopulateCostmapAndPointcloud(
-    const openvdb::Vec3d& pose_world)
+    const openvdb::Vec3d& pose_world, VoxelClass cls)
 /*****************************************************************************/
 {
   // add the world point to the pointcloud and costmap
-  if (_pub_voxels) {
+  const bool publish_class_point =
+      _class_table.GetPolicy(cls).publish_class_voxels;
+  if (_pub_voxels || publish_class_point) {
     geometry_msgs::Point32 point;
     point.x = pose_world[0];
     point.y = pose_world[1];
     point.z = pose_world[2];
-    _grid_points->push_back(point);
+    if (_pub_voxels) {
+      _grid_points->push_back(point);
+    }
+    if (publish_class_point) {
+      _class_points[static_cast<std::size_t>(cls)].push_back(point);
+    }
   }
 
   std::unordered_map<occupany_cell, uint>::iterator cell;
@@ -706,12 +716,12 @@ double SpatioTemporalVoxelGrid::GetFrustumAcceleration(
 }
 
 /*****************************************************************************/
-void SpatioTemporalVoxelGrid::GetOccupancyPointCloud(
-    sensor_msgs::PointCloud2::Ptr& pc2)
+void SpatioTemporalVoxelGrid::FillPointCloud(
+    const std::vector<geometry_msgs::Point32>& points,
+    sensor_msgs::PointCloud2::Ptr& pc2) const
 /*****************************************************************************/
 {
-  // convert the grid points stored in a PointCloud2
-  pc2->width = _grid_points->size();
+  pc2->width = points.size();
   pc2->height = 1;
   pc2->is_dense = true;
 
@@ -726,18 +736,30 @@ void SpatioTemporalVoxelGrid::GetOccupancyPointCloud(
   sensor_msgs::PointCloud2Iterator<float> iter_y(*pc2, "y");
   sensor_msgs::PointCloud2Iterator<float> iter_z(*pc2, "z");
 
-  for (std::vector<geometry_msgs::Point32>::iterator it = _grid_points->begin();
-       it != _grid_points->end(); ++it) {
-    const geometry_msgs::Point32& pt = *it;
-    *iter_x = pt.x;
-    *iter_y = pt.y;
-    *iter_z = pt.z;
+  for (const geometry_msgs::Point32& point : points) {
+    *iter_x = point.x;
+    *iter_y = point.y;
+    *iter_z = point.z;
     ++iter_x;
     ++iter_y;
     ++iter_z;
   }
+}
 
-  return;
+/*****************************************************************************/
+void SpatioTemporalVoxelGrid::GetAllVoxelsPointCloud(
+    sensor_msgs::PointCloud2::Ptr& pc2) const
+/*****************************************************************************/
+{
+  FillPointCloud(*_grid_points, pc2);
+}
+
+/*****************************************************************************/
+void SpatioTemporalVoxelGrid::GetClassPointCloud(
+    VoxelClass cls, sensor_msgs::PointCloud2::Ptr& pc2) const
+/*****************************************************************************/
+{
+  FillPointCloud(_class_points[static_cast<std::size_t>(cls)], pc2);
 }
 
 /*****************************************************************************/
@@ -785,6 +807,48 @@ void SpatioTemporalVoxelGrid::ResetGridArea(const occupany_cell& start,
       ClearGridPoint(pt_index, value_accessor, class_accessor);
     }
   }
+}
+
+/*****************************************************************************/
+std::size_t SpatioTemporalVoxelGrid::ClearClassVoxels(VoxelClass cls)
+/*****************************************************************************/
+{
+  boost::unique_lock<boost::mutex> lock(_grid_lock);
+
+  if (cls == VoxelClass::kGeneric) {
+    return 0;
+  }
+
+  // Clearing a voxel now would break the loop below.
+  const int32_t target_id = ToClassId(cls);
+  std::vector<openvdb::Coord> voxels_to_clear;
+  for (openvdb::Int32Grid::ValueOnCIter cit = _class_grid->cbeginValueOn();
+       cit.test(); ++cit) {
+    if (cit.getValue() == target_id) {
+      voxels_to_clear.push_back(cit.getCoord());
+    }
+  }
+
+  openvdb::DoubleGrid::Accessor value_accessor = _grid->getAccessor();
+  openvdb::Int32Grid::Accessor class_accessor = _class_grid->getAccessor();
+  for (const openvdb::Coord& coord : voxels_to_clear) {
+    if (!ClearGridPoint(coord, value_accessor, class_accessor)) {
+      ROS_WARN_THROTTLE(5.0, "Failed to clear point.");
+    }
+  }
+
+  for (auto it = _promotion_candidates.begin();
+       it != _promotion_candidates.end();) {
+    if (it->second.target_class == cls) {
+      it = _promotion_candidates.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  _grid->pruneGrid();
+  _class_grid->pruneGrid();
+  return voxels_to_clear.size();
 }
 
 /*****************************************************************************/
@@ -966,10 +1030,10 @@ bool SpatioTemporalVoxelGrid::SaveGrid(const std::string& file_name,
 {
   try {
     openvdb::io::File file(file_name + ".vdb");
-    openvdb::GridPtrVec grids = {_grid};
+    openvdb::GridPtrVec grids = {_grid, _class_grid};
     file.write(grids);
     file.close();
-    map_size_bytes = _grid->memUsage();
+    map_size_bytes = _grid->memUsage() + _class_grid->memUsage();
     return true;
   } catch (...) {
     map_size_bytes = 0.;

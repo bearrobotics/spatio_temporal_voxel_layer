@@ -50,6 +50,9 @@
  *  - Safety zone frustum support
  *  - Per-voxel-class obstacle policies (per-class decay and clearing)
  *  - Multi-frame class confirmation (marked generic until promoted)
+ *  - Per-class voxel point cloud topics
+ *  - ClearClassVoxels service (removes every voxel of one class)
+ *  - Voxel grid wipe on pose reset or map change
  *  - Various bug fixes and performance improvements
  *    (see git history for detailed per-commit changes)
  * Contributors:
@@ -103,6 +106,8 @@ void LoadVoxelClasses(ros::NodeHandle& nh, VoxelClassTable::Config& config) {
     VoxelClassPolicy policy;
     policy.decay_seconds = LoadRequiredParam<double>(class_nh, "decay");
     policy.priority = LoadRequiredParam<int>(class_nh, "priority");
+    policy.publish_class_voxels =
+        LoadRequiredParam<bool>(class_nh, "publish_class_voxels");
 
     if (class_nh.hasParam("confirmation")) {
       ros::NodeHandle confirmation_nh(class_nh, "confirmation");
@@ -112,7 +117,6 @@ void LoadVoxelClasses(ros::NodeHandle& nh, VoxelClassTable::Config& config) {
           LoadRequiredParam<double>(confirmation_nh, "window");
     }
 
-    // Every flag is required; a defaulted one could erase a cliff.
     ros::NodeHandle cleared_nh(class_nh, "cleared_by");
     policy.cleared_by_frustums =
         LoadRequiredParam<bool>(cleared_nh, "frustums");
@@ -335,6 +339,15 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
   }
 
   _voxel_pub = nh.advertise<sensor_msgs::PointCloud2>("voxel_grid", 1);
+  for (const volume_grid::VoxelClassTable::Row& row : class_config.rows) {
+    if (!row.policy.publish_class_voxels) {
+      continue;
+    }
+    const std::string topic =
+        volume_grid::ToClassName(row.voxel_class) + "_voxel_grid";
+    _class_voxel_pubs.push_back(
+        {row.voxel_class, nh.advertise<sensor_msgs::PointCloud2>(topic, 1)});
+  }
   _blind_spot_pub =
       nh.advertise<visualization_msgs::Marker>("blind_spot_point", 1);
   _grid_saver =
@@ -357,6 +370,26 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
   _clear_robot_footprint_server =
       nh.advertiseService("clear_robot_footprint",
                           &SpatioTemporalVoxelLayer::ClearRobotFootprint, this);
+
+  _clear_class_voxels_server = nh.advertiseService(
+      "clear_class_voxels", &SpatioTemporalVoxelLayer::ClearClassVoxelsCallback,
+      this);
+
+  _clear_grid_on_map_change =
+      bear::lib::ros::LoadOptionalParam<bool>(nh, "clear_grid_on_map_change")
+          .value_or(false);
+  const bool clear_grid_on_pose_reset =
+      bear::lib::ros::LoadOptionalParam<bool>(nh, "clear_grid_on_pose_reset")
+          .value_or(false);
+  if (clear_grid_on_pose_reset) {
+    const std::string pose_reset_topic =
+        bear::lib::ros::LoadOptionalParam<std::string>(nh,
+                                                       "pose_reset_notif_topic")
+            .value_or("/als_ros/mcl/pose_reset_notif");
+    _pose_reset_sub =
+        nh.subscribe(pose_reset_topic, 1,
+                     &SpatioTemporalVoxelLayer::PoseResetCallback, this);
+  }
 
   const std::string tf_prefix = tf::getPrefixParam(prefix_nh);
   std::stringstream ss(topics_string);
@@ -851,6 +884,52 @@ void SpatioTemporalVoxelLayer::deactivate(void)
 }
 
 /*****************************************************************************/
+void SpatioTemporalVoxelLayer::activateByMapChange(void)
+/*****************************************************************************/
+{
+  if (_clear_grid_on_map_change) {
+    ROS_INFO("Clearing the voxel grid in %s: the map changed.",
+             getName().c_str());
+    ResetGridAndReadings();
+  }
+}
+
+/*****************************************************************************/
+void SpatioTemporalVoxelLayer::PoseResetCallback(
+    const std_msgs::String::ConstPtr&)
+/*****************************************************************************/
+{
+  ROS_INFO("Clearing the voxel grid in %s: the pose was reset.",
+           getName().c_str());
+  ResetGridAndReadings();
+}
+
+/*****************************************************************************/
+void SpatioTemporalVoxelLayer::ResetGridAndReadings(void)
+/*****************************************************************************/
+{
+  boost::recursive_mutex::scoped_lock lock(_voxel_grid_lock);
+  ResetGrid();
+
+  // Buffered readings hold global-frame positions from the old pose.
+  for (unsigned int i = 0; i != _observation_buffers.size(); ++i) {
+    _observation_buffers[i]->Lock();
+    _observation_buffers[i]->ResetAllMeasurements();
+    _observation_buffers[i]->Unlock();
+  }
+
+  AddWholeLayerToExtraBounds();
+}
+
+/*****************************************************************************/
+void SpatioTemporalVoxelLayer::AddWholeLayerToExtraBounds(void)
+/*****************************************************************************/
+{
+  addExtraBounds(getOriginX(), getOriginY(), getOriginX() + getSizeInMetersX(),
+                 getOriginY() + getSizeInMetersY());
+}
+
+/*****************************************************************************/
 void SpatioTemporalVoxelLayer::reset(void)
 /*****************************************************************************/
 {
@@ -1079,13 +1158,16 @@ void SpatioTemporalVoxelLayer::updateBounds(double robot_x, double robot_y,
   // publish point cloud in navigation mode
   bool is_time_limit_reached =
       ros::Time::now() > last_publish_time_ + publish_voxel_map_period_;
-  if (_publish_voxels && !_mapping_mode && is_time_limit_reached) {
+  if (!_mapping_mode && is_time_limit_reached) {
     last_publish_time_ = ros::Time::now();
-    sensor_msgs::PointCloud2::Ptr pc2(new sensor_msgs::PointCloud2());
-    _voxel_grid->GetOccupancyPointCloud(pc2);
-    pc2->header.frame_id = _global_frame;
-    pc2->header.stamp = ros::Time::now();
-    _voxel_pub.publish(*pc2);
+    if (_publish_voxels) {
+      sensor_msgs::PointCloud2::Ptr pc2(new sensor_msgs::PointCloud2());
+      _voxel_grid->GetAllVoxelsPointCloud(pc2);
+      pc2->header.frame_id = _global_frame;
+      pc2->header.stamp = ros::Time::now();
+      _voxel_pub.publish(*pc2);
+    }
+    PublishClassVoxelGrids();
   }
 
   // update footprint
@@ -1115,6 +1197,59 @@ bool SpatioTemporalVoxelLayer::SaveGridCallback(
   ROS_WARN("SpatioTemporalVoxelGrid: Failed to save grid.");
   resp.status = false;
   return false;
+}
+
+/*****************************************************************************/
+bool SpatioTemporalVoxelLayer::ClearClassVoxelsCallback(
+    bear_msgs::ClearClassVoxels::Request& req,
+    bear_msgs::ClearClassVoxels::Response& resp)
+/*****************************************************************************/
+{
+  resp.success = false;
+  resp.cleared_voxels = 0;
+
+  const std::optional<volume_grid::VoxelClass> voxel_class =
+      volume_grid::ParseVoxelClass(req.class_name);
+  if (!voxel_class) {
+    resp.message = "Unknown voxel class '" + req.class_name + "'.";
+    ROS_WARN_STREAM("clear_class_voxels rejected. " << resp.message);
+    return true;
+  }
+  if (*voxel_class == volume_grid::VoxelClass::kGeneric) {
+    resp.message = "Generic voxels carry no class and cannot be cleared here.";
+    ROS_WARN_STREAM("clear_class_voxels rejected. " << resp.message);
+    return true;
+  }
+  if (_voxel_grid == nullptr) {
+    resp.message = "The voxel grid is not initialized.";
+    ROS_WARN_STREAM("clear_class_voxels rejected. " << resp.message);
+    return true;
+  }
+
+  boost::recursive_mutex::scoped_lock lock(_voxel_grid_lock);
+  resp.cleared_voxels =
+      static_cast<uint32_t>(_voxel_grid->ClearClassVoxels(*voxel_class));
+  if (resp.cleared_voxels > 0) {
+    AddWholeLayerToExtraBounds();
+  }
+  resp.success = true;
+  ROS_INFO("clear_class_voxels cleared %u %s voxels.", resp.cleared_voxels,
+           req.class_name.c_str());
+  return true;
+}
+
+/*****************************************************************************/
+void SpatioTemporalVoxelLayer::PublishClassVoxelGrids()
+/*****************************************************************************/
+{
+  const ros::Time stamp = ros::Time::now();
+  for (const ClassVoxelPublisher& class_pub : _class_voxel_pubs) {
+    sensor_msgs::PointCloud2::Ptr pc2(new sensor_msgs::PointCloud2());
+    _voxel_grid->GetClassPointCloud(class_pub.voxel_class, pc2);
+    pc2->header.frame_id = _global_frame;
+    pc2->header.stamp = stamp;
+    class_pub.publisher.publish(*pc2);
+  }
 }
 
 void SpatioTemporalVoxelLayer::PublishBlindSpotPoint(

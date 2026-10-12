@@ -71,10 +71,14 @@ layer_defaults: &layer_defaults
 classified:
   <<: *layer_defaults
   observation_sources: "camera_source cliff_source"
+  publish_voxel_map: true
+  clear_grid_on_map_change: true
+  clear_grid_on_pose_reset: true
   voxel_classes:
     cliff:
       decay: 120.0
       priority: 10
+      publish_class_voxels: true
       confirmation:
         frames: 3
         window: 1.0

@@ -49,12 +49,18 @@
  *  - CheckBlindSpot and ClearRobotFootprint services
  *  - Sensor data filtering (noise filter, frustum-based filtering)
  *  - Safety zone frustum support
+ *  - Per-voxel-class obstacle policies (per-class decay and clearing)
+ *  - Multi-frame class confirmation (marked generic until promoted)
+ *  - Per-class voxel point cloud topics
+ *  - ClearClassVoxels service (removes every voxel of one class)
+ *  - Voxel grid wipe on pose reset or map change
  *  - Various bug fixes and performance improvements
  *    (see git history for detailed per-commit changes)
  * Contributors:
  *  - Vincent Benenati (vincent.benenati@bearrobotics.ai)
  *  - Shivani Sivakumar (shivani.sivakumar@bearrobotics.ai)
  *  - Hashir Zahir (hashir.zahir@bearrobotics.ai)
+ *  - Seung-Hun (Hoon) Han (seunghun.han@bearrobotics.ai)
  * --- BEAR MODIFICATION END ---
  *
  * This library is free software; you can redistribute it and/or
@@ -93,12 +99,14 @@
 #include <string>
 #include <vector>
 // msgs
+#include <bear_msgs/ClearClassVoxels.h>
 #include <geometry_msgs/Point.h>
 #include <sensor_msgs/LaserScan.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <sensor_msgs/point_cloud_conversion.h>
 #include <spatio_temporal_voxel_layer/CheckBlindSpot.h>
 #include <spatio_temporal_voxel_layer/SaveGrid.h>
+#include <std_msgs/String.h>
 #include <std_srvs/SetBool.h>
 #include <std_srvs/Trigger.h>
 // projector
@@ -150,6 +158,7 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
   virtual void reset(void);
   virtual void activate(void);
   virtual void deactivate(void);
+  void activateByMapChange(void) override;
 
   // Functions for sensor feeds
   bool GetMarkingObservations(
@@ -213,7 +222,18 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
   bool SaveGridCallback(spatio_temporal_voxel_layer::SaveGrid::Request& req,
                         spatio_temporal_voxel_layer::SaveGrid::Response& resp);
 
+  bool ClearClassVoxelsCallback(bear_msgs::ClearClassVoxels::Request& req,
+                                bear_msgs::ClearClassVoxels::Response& resp);
+
  private:
+  void PoseResetCallback(const std_msgs::String::ConstPtr& message);
+
+  void ResetGridAndReadings(void);
+
+  void AddWholeLayerToExtraBounds(void);
+
+  void PublishClassVoxelGrids();
+
   // Sensor callbacks
   void LaserScanCallback(
       const sensor_msgs::LaserScanConstPtr& message,
@@ -318,10 +338,19 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
   ros::Duration publish_voxel_map_period_;
   ros::Time last_publish_time_;
 
+  struct ClassVoxelPublisher {
+    volume_grid::VoxelClass voxel_class;
+    ros::Publisher publisher;
+  };
+  std::vector<ClassVoxelPublisher> _class_voxel_pubs;
+
   ros::Publisher _blind_spot_pub;
   ros::ServiceServer _grid_saver;
   ros::ServiceServer _blind_spot_checker;
   ros::ServiceServer _clear_robot_footprint_server;
+  ros::ServiceServer _clear_class_voxels_server;
+  ros::Subscriber _pose_reset_sub;
+  bool _clear_grid_on_map_change;
   double _robot_x, _robot_y, _robot_yaw;
   double _hardware_robot_radius;
 

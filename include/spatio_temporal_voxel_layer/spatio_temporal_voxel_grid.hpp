@@ -52,6 +52,9 @@
  *  - Safety zone frustum support
  *  - Per-voxel-class obstacle policies (per-class decay and clearing)
  *  - Multi-frame class confirmation (marked generic until promoted)
+ *  - Per-class voxel point cloud topics
+ *  - ClearClassVoxels service (removes every voxel of one class)
+ *  - Voxel grid wipe on pose reset or map change
  *  - Various bug fixes and performance improvements
  *    (see git history for detailed per-commit changes)
  * Contributors:
@@ -83,6 +86,8 @@
 // STL
 #include <math.h>
 
+#include <array>
+#include <cstddef>
 #include <ctime>
 #include <iostream>
 #include <unordered_map>
@@ -219,13 +224,18 @@ class SpatioTemporalVoxelGrid {
   bool IsObstacleInSensorDeadZone(const openvdb::Vec3d& point) const;
 
   // Get the pointcloud of the underlying occupancy grid
-  void GetOccupancyPointCloud(sensor_msgs::PointCloud2::Ptr& pc2);
+  void GetAllVoxelsPointCloud(sensor_msgs::PointCloud2::Ptr& pc2) const;
+  void GetClassPointCloud(VoxelClass cls,
+                          sensor_msgs::PointCloud2::Ptr& pc2) const;
   std::unordered_map<occupany_cell, uint>* GetFlattenedCostmap();
 
   // Clear the grid
   bool ResetGrid(void);
   void ResetGridArea(const occupany_cell& start, const occupany_cell& end,
                      bool invert_area = false);
+
+  // Returns how many voxels were removed; kGeneric removes none.
+  std::size_t ClearClassVoxels(VoxelClass cls);
 
   // Save the file to file with size information
   bool SaveGrid(const std::string& file_name, double& map_size_bytes);
@@ -307,7 +317,10 @@ class SpatioTemporalVoxelGrid {
           dynamic_obstacle_frustums);
 
   // Populate the costmap ROS api and pointcloud with a marked point
-  void PopulateCostmapAndPointcloud(const openvdb::Vec3d& pose_world);
+  void PopulateCostmapAndPointcloud(const openvdb::Vec3d& pose_world,
+                                    VoxelClass cls);
+  void FillPointCloud(const std::vector<geometry_msgs::Point32>& points,
+                      sensor_msgs::PointCloud2::Ptr& pc2) const;
 
   // Utilities for tranformation
   openvdb::Vec3d WorldToIndex(const openvdb::Vec3d& coord) const;
@@ -337,6 +350,9 @@ class SpatioTemporalVoxelGrid {
   double _background_value, _voxel_size;
   bool _pub_voxels;
   std::vector<geometry_msgs::Point32>* _grid_points;
+  // The points each class publishes, refilled by every decay pass.
+  std::array<std::vector<geometry_msgs::Point32>, kVoxelClassCount>
+      _class_points;
   std::unordered_map<occupany_cell, uint>* _cost_map;
   boost::mutex _grid_lock;
   std::unique_ptr<geometry::FootprintFrustum> _safety_zone_frustum;

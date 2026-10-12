@@ -23,9 +23,11 @@
  * Author: Seung-Hun (Hoon) Han (seunghun.han@bearrobotics.ai)
  *********************************************************************/
 
+#include <bear_msgs/ClearClassVoxels.h>
 #include <costmap_2d/cost_values.h>
 #include <costmap_2d/costmap_2d.h>
 #include <costmap_2d/layered_costmap.h>
+#include <ros/master.h>
 #include <ros/ros.h>
 
 #include <boost/make_shared.hpp>
@@ -45,6 +47,22 @@ constexpr char kGlobalFrame[] = "map";
 constexpr unsigned int kMapCells = 20;
 constexpr double kResolution = 0.05;
 constexpr double kMapOrigin = -0.5;
+constexpr char kClassifiedLayer[] = "classified";
+constexpr char kGenericOnlyLayer[] = "generic_only";
+// The layer advertises under <param namespace>/<layer name>.
+constexpr char kCliffVoxelTopic[] =
+    "/stvl_layer_params_test/classified/cliff_voxel_grid";
+
+bool IsAdvertised(const std::string& topic_name, const std::string& datatype) {
+  ros::master::V_TopicInfo topics;
+  ros::master::getTopics(topics);
+  for (const ros::master::TopicInfo& topic : topics) {
+    if (topic.name == topic_name) {
+      return topic.datatype == datatype;
+    }
+  }
+  return false;
+}
 
 unsigned int CountCellsWithCost(const costmap_2d::Costmap2D& costmap,
                                 unsigned char value) {
@@ -92,16 +110,67 @@ class LayerVoxelClassParamsTest : public ::testing::Test {
               0u);
   }
 
+  bear_msgs::ClearClassVoxels::Response ClearClassVoxels(
+      SpatioTemporalVoxelLayer& layer, const std::string& class_name) {
+    bear_msgs::ClearClassVoxels::Request req;
+    bear_msgs::ClearClassVoxels::Response resp;
+    req.class_name = class_name;
+    EXPECT_TRUE(layer.ClearClassVoxelsCallback(req, resp));
+    return resp;
+  }
+
+  bool LastUpdateRedrewTheWholeMap() {
+    unsigned int x0 = 0;
+    unsigned int xn = 0;
+    unsigned int y0 = 0;
+    unsigned int yn = 0;
+    layered_costmap_.getBounds(&x0, &xn, &y0, &yn);
+    return x0 == 0 && y0 == 0 && xn == kMapCells && yn == kMapCells;
+  }
+
   ros::NodeHandle parent_nh_;
   costmap_2d::LayeredCostmap layered_costmap_;
 };
 
 TEST_F(LayerVoxelClassParamsTest, ClassifiedSourcesInitializeAndStartEmpty) {
-  ExpectInitializedAndEmpty(InitializeLayer("classified"));
+  ExpectInitializedAndEmpty(InitializeLayer(kClassifiedLayer));
 }
 
 TEST_F(LayerVoxelClassParamsTest, SourcesDefaultToGenericWithoutVoxelClasses) {
-  ExpectInitializedAndEmpty(InitializeLayer("generic_only"));
+  ExpectInitializedAndEmpty(InitializeLayer(kGenericOnlyLayer));
+}
+
+TEST_F(LayerVoxelClassParamsTest, PublishingClassAdvertisesItsVoxelTopic) {
+  InitializeLayer(kClassifiedLayer);
+  ASSERT_TRUE(ros::ok());
+
+  EXPECT_TRUE(IsAdvertised(kCliffVoxelTopic, "sensor_msgs/PointCloud2"));
+}
+
+TEST_F(LayerVoxelClassParamsTest, ClearClassVoxelsSucceedsOnceInitialized) {
+  boost::shared_ptr<SpatioTemporalVoxelLayer> layer =
+      InitializeLayer(kClassifiedLayer);
+  ASSERT_TRUE(ros::ok());
+
+  const bear_msgs::ClearClassVoxels::Response resp =
+      ClearClassVoxels(*layer, "cliff");
+
+  EXPECT_TRUE(resp.success);
+  EXPECT_EQ(resp.cleared_voxels, 0u);
+  EXPECT_TRUE(resp.message.empty());
+}
+
+TEST_F(LayerVoxelClassParamsTest, MapChangeResetRedrawsTheWholeLayer) {
+  boost::shared_ptr<SpatioTemporalVoxelLayer> layer =
+      InitializeLayer(kClassifiedLayer);
+  ASSERT_TRUE(ros::ok());
+
+  layer->activateByMapChange();
+  layered_costmap_.updateMap(0.0, 0.0, 0.0);
+
+  EXPECT_TRUE(LastUpdateRedrewTheWholeMap())
+      << "a reset must hand the whole cleared area back to the master costmap";
+  EXPECT_TRUE(layer->isCurrent());
 }
 
 }  // namespace

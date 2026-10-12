@@ -86,6 +86,7 @@ struct VoxelClassPolicy {
   bool cleared_by_footprint_clear = true;
   bool cleared_by_front_blind_spot = true;
   bool decays_in_inter_sensor_prism = true;
+  bool publish_class_voxels = false;
 
   // Applies to configured rows only; the generic row is seeded from the
   // layer's voxel_decay and skips it.

@@ -97,6 +97,7 @@ cc_binary(
         "//ROS/external/perception_pcl/pcl_ros:pcl_ros_tf",
         "//ROS/multi_robot/public:cc_msgs",
         "//ROS/pennybot_perception/obstacle_detector:cc_obstacle_detector_msgs",
+        "//bear_msgs:cc_bear_msgs",
         "//third_party/pcl:common",
         "//third_party/pcl:filters",
         "//third_party/ros:cc_sensor_msgs",
@@ -131,6 +132,7 @@ cc_library(
         "//ROS/external/perception_pcl/pcl_ros:pcl_ros_tf",
         "//ROS/multi_robot/public:cc_msgs",
         "//ROS/pennybot_perception/obstacle_detector:cc_obstacle_detector_msgs",
+        "//bear_msgs:cc_bear_msgs",
         "//third_party/pcl:common",
         "//third_party/pcl:filters",
         "//third_party/ros:cc_sensor_msgs",
@@ -399,8 +401,37 @@ cc_ros_test(
     deps = [
         ":spatio_temporal_voxel_layer_plugin",
         "//ROS/external/navigation/costmap_2d",
+        "//bear_msgs:cc_bear_msgs",
         "//third_party/ros:roscpp",
         "@gtests//:gtest",
+    ],
+)
+
+cc_ros_test(
+    name = "test_clear_class_voxels_service",
+    size = "small",
+    srcs = ["test/test_clear_class_voxels_service.cpp"],
+    launch_file = "test/test_clear_class_voxels_service.test",
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        "//bear_msgs:cc_bear_msgs",
+        "//third_party/ros:roscpp",
+        "@gtests//:gtest",
+        "@openvdb",
+    ],
+)
+
+cc_ros_test(
+    name = "test_class_publish_and_clear",
+    size = "small",
+    srcs = ["test/test_class_publish_and_clear.cpp"],
+    launch_file = "test/test_class_publish_and_clear.test",
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        ":test_utils",
+        "//third_party/ros:roscpp",
+        "@gtests//:gtest",
+        "@openvdb",
     ],
 )
 

@@ -293,6 +293,20 @@ cc_ros_test(
 )
 
 cc_ros_test(
+    name = "test_frustum_visualization",
+    size = "small",
+    srcs = ["test/test_frustum_visualization.cpp"],
+    launch_file = "test/test_frustum_visualization.test",
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        ":test_utils",
+        "//third_party/ros:roscpp",
+        "@gtests//:gtest",
+        "@openvdb",
+    ],
+)
+
+cc_ros_test(
     name = "test_is_point_in_frustums",
     size = "small",
     srcs = ["test/test_is_point_in_frustums.cpp"],
@@ -381,6 +395,7 @@ cc_ros_test(
     name = "test_measurement_buffer",
     size = "small",
     srcs = ["test/test_measurement_buffer.cpp"],
+    launch_file = "test/test_measurement_buffer.test",
     deps = [
         ":spatio_temporal_voxel_layer_plugin",
         ":test_utils",

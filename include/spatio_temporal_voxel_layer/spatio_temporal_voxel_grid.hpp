@@ -51,6 +51,7 @@
  *  - Sensor data filtering (noise filter, frustum-based filtering)
  *  - Safety zone frustum support
  *  - Per-voxel-class obstacle policies (per-class decay and clearing)
+ *  - Frustums identified per observation source instead of sensor frame
  *  - Multi-frame class confirmation (marked generic until promoted)
  *  - Per-class voxel point cloud topics
  *  - ClearClassVoxels service (removes every voxel of one class)
@@ -203,14 +204,13 @@ class SpatioTemporalVoxelGrid {
 
   /**
    * @brief Adds frustum visualization markers for RViz display.
-   * @details Assigns sensor-specific colors to frustum markers and publishes
-   * them for visualization. Different sensors (e.g., astra_depth,
-   * astra_down_depth, astra_up_depth) are assigned unique colors.
-   * @param sensor_name Name of the sensor frustum being visualized.
+   * @details Namespaces the markers by source and gives each source a color
+   * from a fixed palette, so sources sharing a camera stay distinguishable.
+   * @param source_name Name of the observation source being visualized.
    * @param frustum_marker Marker array containing the frustum geometry.
    */
   void AddVisualizationMarker(
-      const std::string& sensor_name,
+      const std::string& source_name,
       const visualization_msgs::MarkerArray& frustum_marker);
 
   /**
@@ -328,7 +328,7 @@ class SpatioTemporalVoxelGrid {
 
   struct LastReading {
     ros::Time time;
-    std::string sensor_name;
+    std::string source_name;
     std::unique_ptr<geometry::Frustum> frustum;
   };
   std::vector<LastReading> last_readings_;
@@ -367,6 +367,7 @@ class SpatioTemporalVoxelGrid {
   double _robot_y;
   double _robot_yaw;
   visualization_msgs::MarkerArray _frustum_markers;
+  std::unordered_map<std::string, std_msgs::ColorRGBA> _source_colors;
 };
 
 }  // namespace volume_grid

@@ -89,7 +89,7 @@ const geometry_msgs::Point kGenericOnRobotPath = MakePoint(0.5, 0.2, 0.1);
 observation::MeasurementReading MakeMarkingReading(
     const std::vector<geometry_msgs::Point>& points, VoxelClass voxel_class) {
   observation::MeasurementReading reading;
-  reading._sensor_name = "marker";
+  reading._source_name = "marker";
   reading._cloud = boost::make_shared<sensor_msgs::PointCloud2>(
       test_utils::MakePointCloud(points));
   reading._origin = MakePoint(0.0, 0.0, 0.0);
@@ -103,7 +103,7 @@ observation::MeasurementReading MakeMarkingReading(
 observation::MeasurementReading MakeGenericClearingReading() {
   ros::NodeHandle frustum_nh("/class_persistence_test/frustum");
   observation::MeasurementReading reading;
-  reading._sensor_name = "camera";
+  reading._source_name = "camera";
   reading._cloud->header.stamp = ros::Time(1.0);
   reading._origin = MakePoint(0.0, 0.0, 0.0);
   reading._orientation = MakeIdentityQuaternion();

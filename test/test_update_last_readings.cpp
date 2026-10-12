@@ -37,11 +37,11 @@ namespace {
 using spatio_temporal_voxel_layer::test_utils::MakeTestGrid;
 
 observation::MeasurementReading MakeReading(
-    ros::NodeHandle& frustum_nh, const std::string& sensor_name,
+    ros::NodeHandle& frustum_nh, const std::string& source_name,
     const ros::Time& time, const geometry_msgs::Point& origin,
     const geometry_msgs::Quaternion& orientation) {
   observation::MeasurementReading reading;
-  reading._sensor_name = sensor_name;
+  reading._source_name = source_name;
   reading._cloud = boost::make_shared<sensor_msgs::PointCloud2>();
   reading._cloud->header.stamp = time;
   reading._origin = origin;

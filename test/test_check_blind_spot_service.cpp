@@ -45,7 +45,7 @@ observation::MeasurementReading MakeMarkingReading(
     const geometry_msgs::Point& origin,
     const std::vector<geometry_msgs::Point>& obstacle_points) {
   observation::MeasurementReading reading;
-  reading._sensor_name = "marker";
+  reading._source_name = "marker";
   reading._cloud = boost::make_shared<sensor_msgs::PointCloud2>(
       MakePointCloud(obstacle_points));
   reading._origin = origin;
@@ -56,11 +56,11 @@ observation::MeasurementReading MakeMarkingReading(
 }
 
 observation::MeasurementReading MakeSensorReading(
-    ros::NodeHandle& frustum_nh, const std::string& sensor_name,
+    ros::NodeHandle& frustum_nh, const std::string& source_name,
     const ros::Time& time, const geometry_msgs::Point& origin,
     const geometry_msgs::Quaternion& orientation) {
   observation::MeasurementReading reading;
-  reading._sensor_name = sensor_name;
+  reading._source_name = source_name;
   reading._cloud = boost::make_shared<sensor_msgs::PointCloud2>();
   reading._cloud->header.stamp = time;
   reading._origin = origin;

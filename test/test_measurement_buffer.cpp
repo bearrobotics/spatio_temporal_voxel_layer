@@ -30,6 +30,7 @@
 #include <tf2_ros/buffer.h>
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -47,6 +48,8 @@ using spatio_temporal_voxel_layer::PassthroughFilter;
 using volume_grid::VoxelClass;
 
 constexpr char kGlobalFrame[] = "map";
+constexpr char kSourceName[] = "camera_source";
+constexpr char kCliffSourceName[] = "gemini_down_cliff";
 constexpr char kSensorFrame[] = "camera";
 constexpr double kSensorX = 1.0;
 constexpr double kSensorY = 2.0;
@@ -74,11 +77,12 @@ class MeasurementBufferTest : public ::testing::Test {
   }
 
   std::unique_ptr<buffer::MeasurementBuffer> MakeBuffer(
-      bool marking, bool clearing, VoxelClass voxel_class) {
+      bool marking, bool clearing, VoxelClass voxel_class,
+      const std::string& source_name = kSourceName) {
     // Zero keep time and rate: keep only the latest cloud, never check
     // staleness.
     return std::make_unique<buffer::MeasurementBuffer>(
-        "/unused/points", /*observation_keep_time=*/0.0,
+        "/unused/points", source_name, /*observation_keep_time=*/0.0,
         /*expected_update_rate=*/0.0, /*obstacle_range=*/5.0, tf_buffer_,
         kGlobalFrame, kSensorFrame, /*tf_tolerance=*/0.1,
         /*decay_acceleration=*/0.0, marking, clearing, voxel_class,
@@ -121,6 +125,20 @@ TEST_F(MeasurementBufferTest, ReadingCarriesTheSourceVoxelClass) {
   EXPECT_FALSE(readings[0]._clearing);
   EXPECT_DOUBLE_EQ(readings[0]._origin.x, kSensorX);
   EXPECT_DOUBLE_EQ(readings[0]._origin.y, kSensorY);
+}
+
+// Two sources can share a sensor frame, so the reading must carry the source.
+TEST_F(MeasurementBufferTest, ReadingCarriesSourceNameNotSensorFrame) {
+  std::unique_ptr<buffer::MeasurementBuffer> buffer =
+      MakeBuffer(/*marking=*/true, /*clearing=*/false, VoxelClass::kGeneric,
+                 kCliffSourceName);
+
+  buffer->BufferROSCloud(MakeSensorCloud({MakePoint(1.0, 0.0, 0.0)}));
+
+  const std::vector<observation::MeasurementReading> readings =
+      ReadingsOf(*buffer);
+  ASSERT_EQ(readings.size(), 1u);
+  EXPECT_EQ(readings[0]._source_name, kCliffSourceName);
 }
 
 }  // namespace

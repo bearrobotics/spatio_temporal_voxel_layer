@@ -48,6 +48,7 @@
  *  - Sensor data filtering (noise filter, frustum-based filtering)
  *  - Safety zone frustum support
  *  - Per-voxel-class obstacle policies (per-class decay and clearing)
+ *  - Frustums identified per observation source instead of sensor frame
  *  - Various bug fixes and performance improvements
  *    (see git history for detailed per-commit changes)
  * Contributors:
@@ -107,6 +108,7 @@ typedef sensor_msgs::PointCloud2::Ptr point_cloud_ptr;
 class MeasurementBuffer {
  public:
   MeasurementBuffer(const std::string& topic_name,
+                    const std::string& source_name,
                     const double& observation_keep_time,
                     const double& expected_update_rate,
                     const double& obstacle_range, tf2_ros::Buffer& tf,
@@ -149,7 +151,7 @@ class MeasurementBuffer {
   const ros::Duration _observation_keep_time, _expected_update_rate;
   boost::recursive_mutex _lock;
   ros::Time _last_updated;
-  std::string _global_frame, _topic_name, _sensor_frame;
+  std::string _global_frame, _topic_name, _source_name, _sensor_frame;
   std::list<observation::MeasurementReading> _observation_list;
   double _obstacle_range, _tf_tolerance;
   double _decay_acceleration, _voxel_size;

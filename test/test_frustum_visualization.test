@@ -1,0 +1,6 @@
+<launch>
+    <test test-name="test_frustum_visualization" pkg="spatio_temporal_voxel_layer"
+          type="test_frustum_visualization"
+          bazel="ROS/external/navigation/spatio_temporal_voxel_layer/test_frustum_visualization_runner"
+          time-limit="60" />
+</launch>

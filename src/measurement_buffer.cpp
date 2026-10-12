@@ -47,6 +47,7 @@
  *  - Sensor data filtering (noise filter, frustum-based filtering)
  *  - Safety zone frustum support
  *  - Per-voxel-class obstacle policies (per-class decay and clearing)
+ *  - Frustums identified per observation source instead of sensor frame
  *  - Various bug fixes and performance improvements
  *    (see git history for detailed per-commit changes)
  * Contributors:
@@ -76,11 +77,12 @@ namespace buffer {
 
 /*****************************************************************************/
 MeasurementBuffer::MeasurementBuffer(
-    const std::string& topic_name, const double& observation_keep_time,
-    const double& expected_update_rate, const double& obstacle_range,
-    tf2_ros::Buffer& tf, const std::string& global_frame,
-    const std::string& sensor_frame, const double& tf_tolerance,
-    const double& decay_acceleration, const bool& marking, const bool& clearing,
+    const std::string& topic_name, const std::string& source_name,
+    const double& observation_keep_time, const double& expected_update_rate,
+    const double& obstacle_range, tf2_ros::Buffer& tf,
+    const std::string& global_frame, const std::string& sensor_frame,
+    const double& tf_tolerance, const double& decay_acceleration,
+    const bool& marking, const bool& clearing,
     volume_grid::VoxelClass voxel_class, double voxel_size,
     std::unique_ptr<spatio_temporal_voxel_layer::Filter> filter,
     const bool& enabled, const bool& clear_buffer_after_reading,
@@ -93,6 +95,7 @@ MeasurementBuffer::MeasurementBuffer(
       _global_frame(global_frame),
       _sensor_frame(sensor_frame),
       _topic_name(topic_name),
+      _source_name(source_name),
       _obstacle_range(obstacle_range),
       _tf_tolerance(tf_tolerance),
       _decay_acceleration(decay_acceleration),
@@ -121,7 +124,7 @@ void MeasurementBuffer::BufferROSCloud(const sensor_msgs::PointCloud2& cloud)
   const std::string origin_frame =
       _sensor_frame == "" ? cloud.header.frame_id : _sensor_frame;
 
-  _observation_list.front()._sensor_name = origin_frame;
+  _observation_list.front()._source_name = _source_name;
 
   try {
     // transform into global frame
@@ -176,8 +179,11 @@ void MeasurementBuffer::BufferROSCloud(const sensor_msgs::PointCloud2& cloud)
   } catch (tf::TransformException& ex) {
     // if fails, remove the empty observation
     _observation_list.pop_front();
-    ROS_ERROR("TF Exception for sensor frame: %s, cloud frame: %s, %s",
-              _sensor_frame.c_str(), cloud.header.frame_id.c_str(), ex.what());
+    ROS_ERROR_THROTTLE(
+        5.0,
+        "TF Exception for source: %s, sensor frame: %s, cloud frame: %s, %s",
+        _source_name.c_str(), _sensor_frame.c_str(),
+        cloud.header.frame_id.c_str(), ex.what());
     return;
   }
 

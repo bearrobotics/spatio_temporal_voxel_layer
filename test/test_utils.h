@@ -81,6 +81,11 @@ class TestableGrid : public SpatioTemporalVoxelGrid {
     return _promotion_candidates.size();
   }
 
+  [[nodiscard]] const visualization_msgs::MarkerArray& GetFrustumMarkers()
+      const {
+    return _frustum_markers;
+  }
+
   [[nodiscard]] bool IsClassGridConsistent() const {
     openvdb::DoubleGrid::ConstAccessor values = _grid->getConstAccessor();
     for (openvdb::Int32Grid::ValueOnCIter cit = _class_grid->cbeginValueOn();

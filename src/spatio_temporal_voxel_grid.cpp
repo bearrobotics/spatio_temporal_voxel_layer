@@ -49,6 +49,7 @@
  *  - Sensor data filtering (noise filter, frustum-based filtering)
  *  - Safety zone frustum support
  *  - Per-voxel-class obstacle policies (per-class decay and clearing)
+ *  - Frustums identified per observation source instead of sensor frame
  *  - Multi-frame class confirmation (marked generic until promoted)
  *  - Per-class voxel point cloud topics
  *  - ClearClassVoxels service (removes every voxel of one class)
@@ -75,10 +76,25 @@
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 
+#include <array>
 #include <cmath>
 #include <spatio_temporal_voxel_layer/spatio_temporal_voxel_grid.hpp>
 
 namespace volume_grid {
+
+namespace {
+
+constexpr std::array<std::array<float, 3>, 6> kSourceColors = {{
+    {0.0f, 0.0f, 1.0f},
+    {0.0f, 1.0f, 0.0f},
+    {1.0f, 0.0f, 0.0f},
+    {1.0f, 0.0f, 1.0f},
+    {1.0f, 1.0f, 0.0f},
+    {0.0f, 1.0f, 1.0f},
+}};
+constexpr float kSourceColorAlpha = 0.5f;
+
+}  // namespace
 
 /*****************************************************************************/
 SpatioTemporalVoxelGrid::SpatioTemporalVoxelGrid(
@@ -271,7 +287,7 @@ void SpatioTemporalVoxelGrid::ClearFrustums(
 
       visualization_msgs::MarkerArray frustum_marker;
       frustum->GetVisualizationMarker(frustum_marker);
-      AddVisualizationMarker(reading._sensor_name, frustum_marker);
+      AddVisualizationMarker(reading._source_name, frustum_marker);
       obs_frustums.emplace_back(std::move(frustum), reading._decay_acceleration,
                                 reading._voxel_class);
       UpdateLastReadings(reading);
@@ -286,36 +302,27 @@ void SpatioTemporalVoxelGrid::ClearFrustums(
 }
 
 void SpatioTemporalVoxelGrid::AddVisualizationMarker(
-    const std::string& sensor_name,
+    const std::string& source_name,
     const visualization_msgs::MarkerArray& frustum_marker) {
-  std_msgs::ColorRGBA color;
-  if (sensor_name.find("astra_depth_optical_frame") != std::string::npos) {
-    color.r = 0.0f;
-    color.g = 0.0f;
-    color.b = 1.0f;
-    color.a = 0.5f;
-  } else if (sensor_name.find("astra_down_depth_optical_frame") !=
-             std::string::npos) {
-    color.r = 0.0f;
-    color.g = 1.0f;
-    color.b = 0.0f;
-    color.a = 0.5f;
-  } else if (sensor_name.find("astra_up_depth_optical_frame") !=
-             std::string::npos) {
-    color.r = 1.0f;
-    color.g = 0.0f;
-    color.b = 0.0f;
-    color.a = 0.5f;
-  } else {
-    color.r = 1.0f;
-    color.g = 0.0f;
-    color.b = 1.0f;
-    color.a = 0.5f;
+  auto color_it = _source_colors.find(source_name);
+  if (color_it == _source_colors.end()) {
+    const std::array<float, 3>& rgb =
+        kSourceColors[_source_colors.size() % kSourceColors.size()];
+    std_msgs::ColorRGBA color;
+    color.r = rgb[0];
+    color.g = rgb[1];
+    color.b = rgb[2];
+    color.a = kSourceColorAlpha;
+    color_it = _source_colors.emplace(source_name, color).first;
   }
+
+  // One namespace per source gives rviz one checkbox per frustum.
+  int marker_id = 0;
   for (const auto& marker : frustum_marker.markers) {
     visualization_msgs::Marker mod_marker = marker;
-    mod_marker.ns = sensor_name + "_" + marker.ns;
-    mod_marker.color = color;
+    mod_marker.ns = source_name;
+    mod_marker.id = marker_id++;
+    mod_marker.color = color_it->second;
     _frustum_markers.markers.push_back(mod_marker);
   }
 }
@@ -967,10 +974,8 @@ openvdb::Vec3d SpatioTemporalVoxelGrid::IndexToWorld(
 
 void SpatioTemporalVoxelGrid::UpdateLastReadings(
     const observation::MeasurementReading& reading) {
-  // First iterate thorough last readings to see if this sensor already has a
-  // reading (uses sensor name)
   for (auto& last_reading : last_readings_) {
-    if (last_reading.sensor_name != reading._sensor_name) {
+    if (last_reading.source_name != reading._source_name) {
       continue;
     }
     if (last_reading.time >= reading._cloud->header.stamp) {
@@ -987,7 +992,7 @@ void SpatioTemporalVoxelGrid::UpdateLastReadings(
 
   // If not found, add it to the list
   last_readings_.push_back(LastReading{.time = reading._cloud->header.stamp,
-                                       .sensor_name = reading._sensor_name,
+                                       .source_name = reading._source_name,
                                        .frustum = reading._frustrum_factory()});
   last_readings_.back().frustum->SetPosition(reading._origin);
   last_readings_.back().frustum->SetOrientation(reading._orientation);

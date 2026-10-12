@@ -1,0 +1,6 @@
+<launch>
+    <test test-name="test_measurement_buffer" pkg="spatio_temporal_voxel_layer"
+          type="test_measurement_buffer"
+          bazel="ROS/external/navigation/spatio_temporal_voxel_layer/test_measurement_buffer_runner"
+          time-limit="60" />
+</launch>

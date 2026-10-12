@@ -66,7 +66,7 @@ geometry_msgs::Point MakePoint(double x, double y, double z) {
 observation::MeasurementReading MakeReading(
     const std::vector<geometry_msgs::Point>& points, VoxelClass voxel_class) {
   observation::MeasurementReading reading;
-  reading._sensor_name = "marker";
+  reading._source_name = "marker";
   reading._cloud = boost::make_shared<sensor_msgs::PointCloud2>(
       test_utils::MakePointCloud(points));
   reading._cloud->header.stamp = ros::Time(1000.0);

@@ -102,7 +102,7 @@ observation::MeasurementReading MakeMarkingReading(
 observation::MeasurementReading MakeClearingReading(
     ros::NodeHandle& frustum_nh) {
   observation::MeasurementReading reading;
-  reading._sensor_name = "camera";
+  reading._source_name = "camera";
   reading._cloud = boost::make_shared<sensor_msgs::PointCloud2>();
   reading._cloud->header.stamp = ros::Time(1.0);
   reading._origin = MakePoint(0.0, 0.0, 0.0);

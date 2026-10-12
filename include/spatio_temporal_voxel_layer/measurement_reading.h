@@ -49,6 +49,7 @@
  *  - Sensor data filtering (noise filter, frustum-based filtering)
  *  - Safety zone frustum support
  *  - Per-voxel-class obstacle policies (per-class decay and clearing)
+ *  - Frustums identified per observation source instead of sensor frame
  *  - Various bug fixes and performance improvements
  *    (see git history for detailed per-commit changes)
  * Contributors:
@@ -90,13 +91,13 @@ struct MeasurementReading {
   {}
 
   /*****************************************************************************/
-  MeasurementReading(geometry_msgs::Point& origin, std::string sensor_name,
+  MeasurementReading(geometry_msgs::Point& origin, std::string source_name,
                      sensor_msgs::PointCloud2 cloud, double obstacle_range,
                      double decay_acceleration, bool marking, bool clearing,
                      FrustumFactoryFactory::FrustumFactory frustrum_factory)
       : /*****************************************************************************/
         _origin(origin),
-        _sensor_name(sensor_name),
+        _source_name(source_name),
         _cloud(new sensor_msgs::PointCloud2(cloud)),
         _obstacle_range_in_m(obstacle_range),
         _decay_acceleration(decay_acceleration),
@@ -114,7 +115,7 @@ struct MeasurementReading {
   MeasurementReading(const MeasurementReading& obs)
       : /*****************************************************************************/
         _origin(obs._origin),
-        _sensor_name(obs._sensor_name),
+        _source_name(obs._source_name),
         _cloud(new sensor_msgs::PointCloud2(*(obs._cloud))),
         _obstacle_range_in_m(obs._obstacle_range_in_m),
         _marking(obs._marking),
@@ -125,7 +126,8 @@ struct MeasurementReading {
         _frustrum_factory(obs._frustrum_factory) {}
 
   geometry_msgs::Point _origin;
-  std::string _sensor_name;
+  // The observation source key, unique even when sources share a camera.
+  std::string _source_name;
   geometry_msgs::Quaternion _orientation;
   sensor_msgs::PointCloud2::Ptr _cloud;
   double _obstacle_range_in_m;

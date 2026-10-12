@@ -482,11 +482,11 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
     // create an observation buffer
     _observation_buffers.push_back(boost::shared_ptr<buffer::MeasurementBuffer>(
         new buffer::MeasurementBuffer(
-            topic, observation_keep_time, expected_update_rate, obstacle_range,
-            tf_buffer_, _global_frame, sensor_frame, transform_tolerance,
-            decay_acceleration, marking, clearing, *voxel_class, _voxel_size,
-            std::move(filter), enabled, clear_after_reading,
-            frustrum_factory)));
+            topic, source, observation_keep_time, expected_update_rate,
+            obstacle_range, tf_buffer_, _global_frame, sensor_frame,
+            transform_tolerance, decay_acceleration, marking, clearing,
+            *voxel_class, _voxel_size, std::move(filter), enabled,
+            clear_after_reading, frustrum_factory)));
 
     // Add buffer to marking observation buffers
     if (marking == true) {

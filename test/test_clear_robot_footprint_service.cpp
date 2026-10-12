@@ -38,7 +38,7 @@ observation::MeasurementReading MakeMarkingReading(
     const geometry_msgs::Point& origin,
     const std::vector<geometry_msgs::Point>& obstacle_points) {
   observation::MeasurementReading reading;
-  reading._sensor_name = "marker";
+  reading._source_name = "marker";
   reading._cloud = boost::make_shared<sensor_msgs::PointCloud2>(
       spatio_temporal_voxel_layer::test_utils::MakePointCloud(obstacle_points));
   reading._origin = origin;

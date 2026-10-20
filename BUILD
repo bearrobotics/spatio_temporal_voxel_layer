@@ -1,4 +1,6 @@
 load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
+load("@package_metadata//licenses/rules:license.bzl", "license")
+load("@package_metadata//rules:package_metadata.bzl", "package_metadata")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_import", "cc_library")
 load(
     "//build_rules/ros:defs.bzl",
@@ -7,6 +9,20 @@ load(
     "cc_ros_test",
     "ros_dynamic_reconfigure",
     "ros_interface",
+)
+
+package(default_package_metadata = [":package_info"])
+
+license(
+    name = "license",
+    kind = "@package_metadata//licenses/spdx:LGPL-2.1-or-later",
+    text = "LICENSE",
+)
+
+package_metadata(
+    name = "package_info",
+    attributes = [":license"],
+    purl = "pkg:github/SteveMacenski/spatio_temporal_voxel_layer@5e06daf8983f3b0363cddec4a103d320da3b9d9a",
 )
 
 refresh_compile_commands(
@@ -23,6 +39,7 @@ ros_interface(
         "srv/*",
         "action/*",
     ]),
+    visibility = ["//third_party/rosbridge_suite:__pkg__"],
     deps = [
         "//third_party/ros:geometry_msgs",
         "//third_party/ros:std_msgs",

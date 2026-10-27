@@ -91,6 +91,16 @@ TEST_F(MarkSnappingTest, PositiveZNotSnappedByNegativeY) {
   EXPECT_NEAR(voxels[0].z(), 0.125, 1e-4);
 }
 
+TEST_F(MarkSnappingTest, ZeroZMarksTheFirstLayerAboveTheFloor) {
+  MarkPoint(MakePoint(0.22, -0.22, 0.0));
+
+  std::vector<openvdb::Vec3d> voxels =
+      grid_->GetVoxelsAtXY(0.22, -0.22, kVoxelSize);
+
+  ASSERT_EQ(voxels.size(), 1u);
+  EXPECT_NEAR(voxels[0].z(), kVoxelSize / 2.0, 1e-4);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {

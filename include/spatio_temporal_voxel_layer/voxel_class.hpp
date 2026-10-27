@@ -87,6 +87,8 @@ struct VoxelClassPolicy {
   bool cleared_by_front_blind_spot = true;
   bool decays_in_inter_sensor_prism = true;
   bool publish_class_voxels = false;
+  // Every mark of this class is stored at this global-frame z, if set.
+  std::optional<double> store_at_z;
 
   // Applies to configured rows only; the generic row is seeded from the
   // layer's voxel_decay and skips it.

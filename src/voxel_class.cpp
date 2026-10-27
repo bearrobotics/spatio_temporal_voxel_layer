@@ -48,6 +48,9 @@ bool VoxelClassPolicy::IsValid() const {
       confirmation_frames < 1) {
     return false;
   }
+  if (store_at_z.has_value() && !std::isfinite(*store_at_z)) {
+    return false;
+  }
   // A single confirmation frame is the same as no confirmation.
   if (confirmation_frames == 1) {
     return true;
@@ -93,15 +96,17 @@ std::optional<VoxelClassTable> VoxelClassTable::Create(const Config& config) {
       return std::nullopt;
     }
     if (!row.policy.IsValid()) {
-      ROS_ERROR_STREAM("voxel_classes: class '"
-                       << name << "' has priority " << row.policy.priority
-                       << ", decay " << row.policy.decay_seconds
-                       << ", confirmation frames "
-                       << row.policy.confirmation_frames << ", window "
-                       << row.policy.confirmation_window_seconds
-                       << ". Requires priority >= 1, a finite decay > 0, "
-                          "frames >= 1, and a finite window > 0 when frames "
-                          "> 1.");
+      ROS_ERROR_STREAM(
+          "voxel_classes: class '"
+          << name << "' has priority " << row.policy.priority << ", decay "
+          << row.policy.decay_seconds << ", confirmation frames "
+          << row.policy.confirmation_frames << ", window "
+          << row.policy.confirmation_window_seconds << ", store_at_z "
+          << (row.policy.store_at_z ? std::to_string(*row.policy.store_at_z)
+                                    : std::string("unset"))
+          << ". Requires priority >= 1, a finite decay > 0, "
+             "frames >= 1, a finite window > 0 when frames "
+             "> 1, and a finite store_at_z when set.");
       return std::nullopt;
     }
     if (!seen_priorities.insert(row.policy.priority).second) {

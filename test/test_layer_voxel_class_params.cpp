@@ -49,6 +49,9 @@ constexpr double kResolution = 0.05;
 constexpr double kMapOrigin = -0.5;
 constexpr char kClassifiedLayer[] = "classified";
 constexpr char kGenericOnlyLayer[] = "generic_only";
+constexpr char kCliffWithoutStoreAtZLayer[] = "cliff_without_store_at_z";
+constexpr char kNanStoreAtZLayer[] = "nan_store_at_z";
+constexpr char kStringStoreAtZLayer[] = "string_store_at_z";
 // The layer advertises under <param namespace>/<layer name>.
 constexpr char kCliffVoxelTopic[] =
     "/stvl_layer_params_test/classified/cliff_voxel_grid";
@@ -138,6 +141,25 @@ TEST_F(LayerVoxelClassParamsTest, ClassifiedSourcesInitializeAndStartEmpty) {
 
 TEST_F(LayerVoxelClassParamsTest, SourcesDefaultToGenericWithoutVoxelClasses) {
   ExpectInitializedAndEmpty(InitializeLayer(kGenericOnlyLayer));
+}
+
+TEST_F(LayerVoxelClassParamsTest, CliffClassWithoutStoreAtZInitializes) {
+  ExpectInitializedAndEmpty(InitializeLayer(kCliffWithoutStoreAtZLayer));
+}
+
+// The threadsafe style re-runs the test binary instead of forking the node.
+TEST_F(LayerVoxelClassParamsTest, NonFiniteStoreAtZTerminatesAtStartup) {
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+
+  EXPECT_DEATH(InitializeLayer(kNanStoreAtZLayer),
+               "a finite store_at_z when set");
+}
+
+TEST_F(LayerVoxelClassParamsTest, MistypedStoreAtZTerminatesAtStartup) {
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+
+  EXPECT_DEATH(InitializeLayer(kStringStoreAtZLayer),
+               "store_at_z must be a number, got .*zero");
 }
 
 TEST_F(LayerVoxelClassParamsTest, PublishingClassAdvertisesItsVoxelTopic) {

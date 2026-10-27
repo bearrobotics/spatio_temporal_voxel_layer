@@ -21,6 +21,20 @@ source_defaults: &source_defaults
     min_z: 0.1
     max_z: 5.0
 
+cliff_class: &cliff_class
+  decay: 120.0
+  priority: 10
+  publish_class_voxels: true
+  confirmation:
+    frames: 3
+    window: 1.0
+  cleared_by:
+    frustums: true
+    dynamic_obstacles: false
+    footprint_clear: false
+    front_blind_spot: false
+    inter_sensor_decay: false
+
 layer_defaults: &layer_defaults
   observation_sources: "camera_source"
   transform_tolerance: 0.2
@@ -76,22 +90,32 @@ classified:
   clear_grid_on_pose_reset: true
   voxel_classes:
     cliff:
-      decay: 120.0
-      priority: 10
-      publish_class_voxels: true
-      confirmation:
-        frames: 3
-        window: 1.0
-      cleared_by:
-        frustums: true
-        dynamic_obstacles: false
-        footprint_clear: false
-        front_blind_spot: false
-        inter_sensor_decay: false
+      <<: *cliff_class
+      # Written as an int on purpose: yaml authors do, and roscpp promotes it to double.
+      store_at_z: 0
   cliff_source:
     <<: *source_defaults
     topic: /unused/cliff_points
     voxel_class: cliff
+
+cliff_without_store_at_z:
+  <<: *layer_defaults
+  voxel_classes:
+    cliff: *cliff_class
+
+nan_store_at_z:
+  <<: *layer_defaults
+  voxel_classes:
+    cliff:
+      <<: *cliff_class
+      store_at_z: .nan
+
+string_store_at_z:
+  <<: *layer_defaults
+  voxel_classes:
+    cliff:
+      <<: *cliff_class
+      store_at_z: "zero"
 
 generic_only:
   <<: *layer_defaults

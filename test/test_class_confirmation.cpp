@@ -86,7 +86,8 @@ observation::MeasurementReading MakeReading(
 std::optional<VoxelClassTable> MakeCliffTable(
     double generic_decay_seconds,
     int cliff_frames_to_confirm = kFramesToConfirm,
-    double cliff_window_seconds = kWindowSeconds) {
+    double cliff_window_seconds = kWindowSeconds,
+    std::optional<double> cliff_store_at_z = std::nullopt) {
   VoxelClassTable::Config config;
   config.generic_decay_seconds = generic_decay_seconds;
   VoxelClassTable::Row row;
@@ -100,6 +101,7 @@ std::optional<VoxelClassTable> MakeCliffTable(
   row.policy.cleared_by_footprint_clear = false;
   row.policy.cleared_by_front_blind_spot = false;
   row.policy.decays_in_inter_sensor_prism = false;
+  row.policy.store_at_z = cliff_store_at_z;
   config.rows.push_back(row);
   return VoxelClassTable::Create(config);
 }
@@ -157,6 +159,12 @@ TEST(ClassConfirmationTableTest, GatedClassWithoutWindowRejected) {
 TEST(ClassConfirmationTableTest, GatedClassWithInfiniteWindowRejected) {
   EXPECT_FALSE(MakeCliffTable(kDecayNever, kFramesToConfirm,
                               std::numeric_limits<double>::infinity())
+                   .has_value());
+}
+
+TEST(ClassConfirmationTableTest, NonFiniteStoreAtZRejected) {
+  EXPECT_FALSE(MakeCliffTable(kDecayNever, kFramesToConfirm, kWindowSeconds,
+                              std::numeric_limits<double>::quiet_NaN())
                    .has_value());
 }
 
@@ -387,6 +395,42 @@ TEST(ClassConfirmationGridTest, ResetGridAreaDropsPendingEvidence) {
 
   EXPECT_EQ(grid->GetClassAt(CliffVoxelPoint()), VoxelClass::kGeneric)
       << "evidence from before a reset must not complete a promotion";
+}
+
+TEST(ClassStoreAtZTest, CliffMarksAtAnyHeightLandInTheStoreAtZLayerAndPromote) {
+  auto grid = MakeGrid(
+      MakeCliffTable(kDecayNever, kFramesToConfirm, kWindowSeconds, 0.0));
+  const std::vector<geometry_msgs::Point> points = {MakePoint(0.0, 0.0, -0.3),
+                                                    MakePoint(0.2, 0.0, 0.01),
+                                                    MakePoint(0.4, 0.0, -1e-7)};
+
+  for (int frame_index = 0; frame_index < kFramesToConfirm; ++frame_index) {
+    grid->Mark({MakeReading(points, VoxelClass::kCliff, StampAt(frame_index))});
+  }
+
+  for (const geometry_msgs::Point& point : points) {
+    const std::vector<openvdb::Vec3d> voxels =
+        grid->GetVoxelsAtXY(point.x, point.y, kQueryTolerance);
+    ASSERT_EQ(voxels.size(), 1u) << "x=" << point.x;
+    EXPECT_NEAR(voxels[0].z(), test_utils::kVoxelSize / 2.0, 1e-4)
+        << "x=" << point.x;
+    EXPECT_EQ(grid->GetClassAt(MakePoint(point.x, point.y, 0.0)),
+              VoxelClass::kCliff)
+        << "x=" << point.x;
+  }
+}
+
+TEST(ClassStoreAtZTest, GenericSourceKeepsItsOwnHeight) {
+  auto grid = MakeGrid(
+      MakeCliffTable(kDecayNever, kFramesToConfirm, kWindowSeconds, 0.0));
+
+  grid->Mark({MakeReading({MakePoint(0.0, 0.0, -0.3)}, VoxelClass::kGeneric,
+                          StampAt(0))});
+
+  const std::vector<openvdb::Vec3d> voxels =
+      grid->GetVoxelsAtXY(0.0, 0.0, kQueryTolerance);
+  ASSERT_EQ(voxels.size(), 1u);
+  EXPECT_LT(voxels[0].z(), 0.0);
 }
 
 }  // namespace

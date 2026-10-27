@@ -91,6 +91,21 @@ using volume_grid::VoxelClass;
 using volume_grid::VoxelClassPolicy;
 using volume_grid::VoxelClassTable;
 
+// Raw read first: a non-number must stop the layer, not count as unset.
+std::optional<double> LoadStoreAtZ(const ros::NodeHandle& class_nh) {
+  XmlRpc::XmlRpcValue raw;
+  if (!class_nh.getParam("store_at_z", raw)) {
+    return std::nullopt;
+  }
+  double store_at_z = 0.0;
+  if (!class_nh.getParam("store_at_z", store_at_z)) {
+    ROS_FATAL_STREAM(class_nh.getNamespace()
+                     << "/store_at_z must be a number, got " << raw.toXml());
+    std::terminate();
+  }
+  return store_at_z;
+}
+
 void LoadVoxelClasses(ros::NodeHandle& nh, VoxelClassTable::Config& config) {
   using bear::lib::ros::LoadRequiredParam;
 
@@ -108,6 +123,7 @@ void LoadVoxelClasses(ros::NodeHandle& nh, VoxelClassTable::Config& config) {
     policy.priority = LoadRequiredParam<int>(class_nh, "priority");
     policy.publish_class_voxels =
         LoadRequiredParam<bool>(class_nh, "publish_class_voxels");
+    policy.store_at_z = LoadStoreAtZ(class_nh);
 
     if (class_nh.hasParam("confirmation")) {
       ros::NodeHandle confirmation_nh(class_nh, "confirmation");

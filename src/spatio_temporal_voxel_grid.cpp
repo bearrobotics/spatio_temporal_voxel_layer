@@ -627,6 +627,7 @@ void SpatioTemporalVoxelGrid::operator()(
   const VoxelClassPolicy& source_policy = _class_table.GetPolicy(source_class);
   const int32_t source_priority = source_policy.priority;
   const bool needs_confirmation = source_policy.confirmation_frames > 1;
+  const std::optional<double>& store_at_z = source_policy.store_at_z;
   const ros::Time cloud_stamp = obs._cloud->header.stamp;
   // Only a generic source leaves the class grid empty for the whole cloud.
   const bool needs_class_check =
@@ -655,7 +656,8 @@ void SpatioTemporalVoxelGrid::operator()(
 
     double x = *iter_x < 0 ? *iter_x - _voxel_size : *iter_x;
     double y = *iter_y < 0 ? *iter_y - _voxel_size : *iter_y;
-    double z = *iter_z < 0 ? *iter_z - _voxel_size : *iter_z;
+    const double point_z = store_at_z.value_or(*iter_z);
+    double z = point_z < 0 ? point_z - _voxel_size : point_z;
 
     openvdb::Vec3d mark_grid(this->WorldToIndex(openvdb::Vec3d(x, y, z)));
     const openvdb::Coord coord(mark_grid[0], mark_grid[1], mark_grid[2]);

@@ -35,9 +35,7 @@ refresh_compile_commands(
 ros_interface(
     name = "spatio_temporal_voxel_layer",
     srcs = glob([
-        "msgs/*",
         "srv/*",
-        "action/*",
     ]),
     visibility = ["//third_party/rosbridge_suite:__pkg__"],
     deps = [

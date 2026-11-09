@@ -27,8 +27,12 @@
 #include <costmap_2d/cost_values.h>
 #include <costmap_2d/costmap_2d.h>
 #include <costmap_2d/layered_costmap.h>
+#include <geometry_msgs/Point.h>
+#include <ros/callback_queue.h>
 #include <ros/master.h>
 #include <ros/ros.h>
+#include <sensor_msgs/PointCloud2.h>
+#include <std_srvs/SetBool.h>
 
 #include <boost/make_shared.hpp>
 #include <boost/shared_ptr.hpp>
@@ -37,10 +41,12 @@
 
 #include "gtest/gtest.h"
 #include "spatio_temporal_voxel_layer/spatio_temporal_voxel_layer.hpp"
+#include "test/test_utils.h"
 
 namespace {
 
 using spatio_temporal_voxel_layer::SpatioTemporalVoxelLayer;
+using spatio_temporal_voxel_layer::test_utils::MakePointCloud;
 
 // The ns of the rosparam block in test_layer_voxel_class_params.test.
 constexpr char kParamNamespace[] = "/stvl_layer_params_test";
@@ -63,10 +69,22 @@ constexpr char kHitStreakWithoutMissesToBreakLayer[] =
     "hit_streak_without_misses_to_break";
 constexpr char kHitStreakOnUngatedSourceLayer[] =
     "hit_streak_on_ungated_source";
+constexpr char kCreationGatedSourceLayer[] = "creation_gated_source";
+constexpr char kZeroHitsToCreateLayer[] = "zero_hits_to_create";
+constexpr char kStringHitsToCreateLayer[] = "string_hits_to_create";
+constexpr char kZeroSecondsToBreakLayer[] = "zero_seconds_to_break";
+constexpr char kStringSecondsToBreakLayer[] = "string_seconds_to_break";
+constexpr char kNanSecondsToBreakLayer[] = "nan_seconds_to_break";
 constexpr char kUnusedHitStreakWarning[] = "hit_streak is unused";
 // The layer advertises under <param namespace>/<layer name>.
 constexpr char kCliffVoxelTopic[] =
     "/stvl_layer_params_test/classified/cliff_voxel_grid";
+constexpr char kHitStreakResetLayer[] = "hit_streak_reset";
+constexpr char kGatedSourceTopic[] =
+    "/stvl_layer_params_test/hit_streak_reset_frames";
+// The layer serves toggle_enabled under <namespace>/<layer name>/<source>.
+constexpr char kGatedSourceToggleService[] =
+    "/stvl_layer_params_test/hit_streak_reset/gated_camera/toggle_enabled";
 
 bool IsAdvertised(const std::string& topic_name, const std::string& datatype) {
   ros::master::V_TopicInfo topics;
@@ -90,6 +108,27 @@ unsigned int CountCellsWithCost(const costmap_2d::Costmap2D& costmap,
     }
   }
   return count;
+}
+
+// Fixed stamps, so a slow test machine never breaks a streak by time.
+const ros::Time kFirstFrameStamp(100.0);
+constexpr double kFramePeriod = 0.1;
+
+// A point inside the map, so every frame hits the same voxel.
+constexpr double kHitX = 0.2;
+constexpr double kHitY = 0.2;
+constexpr double kHitZ = 0.3;
+
+boost::shared_ptr<sensor_msgs::PointCloud2> MakeHitFrame(
+    const ros::Time& stamp) {
+  geometry_msgs::Point hit;
+  hit.x = kHitX;
+  hit.y = kHitY;
+  hit.z = kHitZ;
+  auto frame =
+      boost::make_shared<sensor_msgs::PointCloud2>(MakePointCloud({hit}));
+  frame->header.stamp = stamp;
+  return frame;
 }
 
 class LayerVoxelClassParamsTest : public ::testing::Test {
@@ -143,8 +182,57 @@ class LayerVoxelClassParamsTest : public ::testing::Test {
     return x0 == 0 && y0 == 0 && xn == kMapCells && yn == kMapCells;
   }
 
+  boost::shared_ptr<SpatioTemporalVoxelLayer> InitializeHitStreakResetLayer() {
+    frame_publisher_ =
+        parent_nh_.advertise<sensor_msgs::PointCloud2>(kGatedSourceTopic, 1);
+    return InitializeLayer(kHitStreakResetLayer);
+  }
+
+  void PublishHitAndUpdate(double seconds_after_previous_frame = kFramePeriod) {
+    next_frame_stamp_ += ros::Duration(seconds_after_previous_frame);
+    // A shared pointer reaches an in-process subscriber before publish returns.
+    frame_publisher_.publish(MakeHitFrame(next_frame_stamp_));
+    // The tf filter queues a second callback, which buffers the frame.
+    DrainCallbackQueue();
+    layered_costmap_.updateMap(0.0, 0.0, 0.0);
+  }
+
+  // One spin runs only the subscriber, so the frame waits in the tf filter.
+  void PublishHitIntoTfFilter() {
+    next_frame_stamp_ += ros::Duration(kFramePeriod);
+    frame_publisher_.publish(MakeHitFrame(next_frame_stamp_));
+    ros::spinOnce();
+  }
+
+  void DrainCallbackQueue() {
+    while (!ros::getGlobalCallbackQueue()->isEmpty()) {
+      ros::spinOnce();
+    }
+  }
+
+  // A spinner serves toggle_enabled while this thread waits for the reply.
+  bool SetGatedSourceEnabled(bool enabled) {
+    std_srvs::SetBool toggle;
+    toggle.request.data = enabled;
+    ros::AsyncSpinner spinner(1);
+    spinner.start();
+    const bool is_called =
+        ros::service::call(kGatedSourceToggleService, toggle);
+    spinner.stop();
+    return is_called && toggle.response.success;
+  }
+
+  // The costmap is built before marking, so a voxel shows one update later.
+  unsigned int CountLethalCellsAfterNextUpdate() {
+    layered_costmap_.updateMap(0.0, 0.0, 0.0);
+    return CountCellsWithCost(*layered_costmap_.getCostmap(),
+                              costmap_2d::LETHAL_OBSTACLE);
+  }
+
   ros::NodeHandle parent_nh_;
   costmap_2d::LayeredCostmap layered_costmap_;
+  ros::Publisher frame_publisher_;
+  ros::Time next_frame_stamp_ = kFirstFrameStamp;
 };
 
 TEST_F(LayerVoxelClassParamsTest, ClassifiedSourcesInitializeAndStartEmpty) {
@@ -217,6 +305,112 @@ TEST_F(LayerVoxelClassParamsTest, ClearingOnlyGatedSourceInitializes) {
   ExpectInitializedAndEmpty(InitializeLayer(kClearingOnlyGatedSourceLayer));
 }
 
+TEST_F(LayerVoxelClassParamsTest, CreationGatedSourceInitializes) {
+  ExpectInitializedAndEmpty(InitializeLayer(kCreationGatedSourceLayer));
+}
+
+TEST_F(LayerVoxelClassParamsTest, ReactivatedLayerStaysEmptyAndCurrent) {
+  boost::shared_ptr<SpatioTemporalVoxelLayer> layer =
+      InitializeLayer(kCreationGatedSourceLayer);
+  layer->deactivate();
+
+  layer->activate();
+
+  ExpectInitializedAndEmpty(layer);
+}
+
+TEST_F(LayerVoxelClassParamsTest, ReenabledSourceNeedsAFullHitStreakToCreate) {
+  InitializeHitStreakResetLayer();
+  PublishHitAndUpdate();
+  PublishHitAndUpdate();
+  ASSERT_EQ(CountLethalCellsAfterNextUpdate(), 0u);
+
+  ASSERT_TRUE(SetGatedSourceEnabled(false));
+  // An update while the source is off reads what the source's buffer holds.
+  layered_costmap_.updateMap(0.0, 0.0, 0.0);
+  ASSERT_TRUE(SetGatedSourceEnabled(true));
+
+  PublishHitAndUpdate();
+  PublishHitAndUpdate();
+  EXPECT_EQ(CountLethalCellsAfterNextUpdate(), 0u)
+      << "a frame from before the toggle counted toward the new hit streak";
+  PublishHitAndUpdate();
+  EXPECT_GT(CountLethalCellsAfterNextUpdate(), 0u);
+}
+
+TEST_F(LayerVoxelClassParamsTest, ReactivatedLayerNeedsAFullHitStreakToCreate) {
+  boost::shared_ptr<SpatioTemporalVoxelLayer> layer =
+      InitializeHitStreakResetLayer();
+  PublishHitAndUpdate();
+  PublishHitAndUpdate();
+  ASSERT_EQ(CountLethalCellsAfterNextUpdate(), 0u);
+  PublishHitIntoTfFilter();
+
+  layer->deactivate();
+  layer->activate();
+  DrainCallbackQueue();
+  // The first update after activation reads what the source's buffer holds.
+  layered_costmap_.updateMap(0.0, 0.0, 0.0);
+
+  PublishHitAndUpdate();
+  PublishHitAndUpdate();
+  EXPECT_EQ(CountLethalCellsAfterNextUpdate(), 0u)
+      << "a frame from before the reactivation counted toward the new hit "
+         "streak";
+  PublishHitAndUpdate();
+  EXPECT_GT(CountLethalCellsAfterNextUpdate(), 0u);
+}
+
+// The frame gap sits between the default seconds_to_break and the source's.
+TEST_F(LayerVoxelClassParamsTest,
+       ConfiguredSecondsToBreakKeepsSlowHitsInOneStreak) {
+  InitializeHitStreakResetLayer();
+  constexpr double kSecondsBetweenFrames = 1.5;
+
+  PublishHitAndUpdate(kSecondsBetweenFrames);
+  PublishHitAndUpdate(kSecondsBetweenFrames);
+  PublishHitAndUpdate(kSecondsBetweenFrames);
+
+  EXPECT_GT(CountLethalCellsAfterNextUpdate(), 0u)
+      << "the default seconds_to_break would break the streak at every frame";
+}
+
+TEST_F(LayerVoxelClassParamsTest, ZeroHitsToCreateTerminatesAtStartup) {
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+
+  EXPECT_DEATH(InitializeLayer(kZeroHitsToCreateLayer),
+               "hits_to_create must be >= 1");
+}
+
+TEST_F(LayerVoxelClassParamsTest, MistypedHitsToCreateTerminatesAtStartup) {
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+
+  EXPECT_DEATH(InitializeLayer(kStringHitsToCreateLayer),
+               "hits_to_create must be an int, got .*3");
+}
+
+TEST_F(LayerVoxelClassParamsTest, ZeroSecondsToBreakTerminatesAtStartup) {
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+
+  EXPECT_DEATH(InitializeLayer(kZeroSecondsToBreakLayer),
+               "seconds_to_break must be a positive finite number, got .*0");
+}
+
+TEST_F(LayerVoxelClassParamsTest, MistypedSecondsToBreakTerminatesAtStartup) {
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+
+  EXPECT_DEATH(
+      InitializeLayer(kStringSecondsToBreakLayer),
+      "seconds_to_break must be a positive finite number, got .*1\\.5");
+}
+
+TEST_F(LayerVoxelClassParamsTest, NonFiniteSecondsToBreakTerminatesAtStartup) {
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+
+  EXPECT_DEATH(InitializeLayer(kNanSecondsToBreakLayer),
+               "seconds_to_break must be a positive finite number, got .*nan");
+}
+
 // The first test shuts the node down, which silences rosconsole for the rest
 // of the process, so the warning is read from a child process.
 TEST_F(LayerVoxelClassParamsTest, HitStreakOnAnUngatedSourceWarnsAtStartup) {
@@ -228,6 +422,20 @@ TEST_F(LayerVoxelClassParamsTest, HitStreakOnAnUngatedSourceWarnsAtStartup) {
         std::_Exit(ros::ok() ? EXIT_SUCCESS : EXIT_FAILURE);
       },
       ::testing::ExitedWithCode(EXIT_SUCCESS), kUnusedHitStreakWarning);
+}
+
+TEST_F(LayerVoxelClassParamsTest, CreationGatedSourceDoesNotWarnAtStartup) {
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+
+  EXPECT_EXIT(
+      {
+        ::testing::internal::CaptureStderr();
+        InitializeLayer(kCreationGatedSourceLayer);
+        const bool warned = ::testing::internal::GetCapturedStderr().find(
+                                kUnusedHitStreakWarning) != std::string::npos;
+        std::_Exit(ros::ok() && !warned ? EXIT_SUCCESS : EXIT_FAILURE);
+      },
+      ::testing::ExitedWithCode(EXIT_SUCCESS), "");
 }
 
 TEST_F(LayerVoxelClassParamsTest, PublishingClassAdvertisesItsVoxelTopic) {

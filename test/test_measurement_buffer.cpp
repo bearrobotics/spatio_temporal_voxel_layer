@@ -55,6 +55,7 @@ constexpr char kSensorFrame[] = "camera";
 constexpr double kSensorX = 1.0;
 constexpr double kSensorY = 2.0;
 constexpr std::size_t kSourceIndex = 2;
+constexpr int kHitsToCreate = 3;
 constexpr int kMissesToBreak = 2;
 const ros::Time kCloudStamp(1.0);
 
@@ -68,6 +69,7 @@ geometry_msgs::Point MakePoint(double x, double y, double z) {
 
 observation::HitStreakPolicy MakeHitStreakPolicy() {
   observation::HitStreakPolicy hit_streak_policy;
+  hit_streak_policy.hits_to_create = kHitsToCreate;
   hit_streak_policy.misses_to_break = kMissesToBreak;
   return hit_streak_policy;
 }
@@ -170,6 +172,7 @@ TEST_F(MeasurementBufferTest, ReadingCarriesTheSourceIndexAndHitStreakPolicy) {
       MarkingReadingsOf(*buffer);
   ASSERT_EQ(readings.size(), 1u);
   EXPECT_EQ(readings[0]._source_index, kSourceIndex);
+  EXPECT_EQ(readings[0]._hit_streak_policy.hits_to_create, kHitsToCreate);
   EXPECT_EQ(readings[0]._hit_streak_policy.misses_to_break, kMissesToBreak);
 }
 

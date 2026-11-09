@@ -60,6 +60,13 @@ constexpr int kHitsToPromote = 3;
 constexpr int kMissesToBreak = 2;
 constexpr std::size_t kCliffSourceIndex = 0;
 constexpr std::size_t kOtherSourceIndex = 1;
+constexpr std::size_t kCreationGatedSourceIndex = 2;
+constexpr int kHitsToCreate = 3;
+constexpr double kMarkAgeBeyondDecay = 2 * kDecayNever;
+constexpr double kSecondsToBreak = 1.0;
+constexpr double kFramePeriod = 0.1;
+// A fixed stamp, so a slow test machine never breaks a streak by time.
+const ros::Time kObservationStamp(100.0);
 
 geometry_msgs::Point MakePoint(double x, double y, double z) {
   geometry_msgs::Point p;
@@ -79,6 +86,7 @@ observation::MeasurementReading MakeReading(
   reading._source_name = "marker";
   reading._cloud = boost::make_shared<sensor_msgs::PointCloud2>(
       test_utils::MakePointCloud(points));
+  reading._cloud->header.stamp = kObservationStamp;
   reading._origin = MakePoint(0.0, 0.0, 0.0);
   reading._marking = true;
   reading._clearing = false;
@@ -87,6 +95,7 @@ observation::MeasurementReading MakeReading(
   reading._source_index = source_index;
   reading._observation_sequence_number = observation_sequence_number;
   reading._hit_streak_policy.misses_to_break = misses_to_break;
+  reading._hit_streak_policy.seconds_to_break = kSecondsToBreak;
   return reading;
 }
 
@@ -152,6 +161,64 @@ void MarkCliffObservations(TestableGrid* grid, int observation_count) {
        ++observation_sequence_number) {
     MarkCliffObservation(grid, observation_sequence_number);
   }
+}
+
+void MarkCliffObservationAt(TestableGrid* grid,
+                            uint64_t observation_sequence_number,
+                            double seconds_after_first) {
+  observation::MeasurementReading reading = MakeReading(
+      {CliffVoxelPoint()}, VoxelClass::kCliff, observation_sequence_number);
+  reading._cloud->header.stamp =
+      kObservationStamp + ros::Duration(seconds_after_first);
+  grid->Mark({reading});
+}
+
+observation::MeasurementReading MakeCreationGatedReading(
+    const std::vector<geometry_msgs::Point>& points,
+    uint64_t observation_sequence_number, int hits_to_create = kHitsToCreate,
+    VoxelClass voxel_class = VoxelClass::kGeneric) {
+  observation::MeasurementReading reading =
+      MakeReading(points, voxel_class, observation_sequence_number,
+                  kCreationGatedSourceIndex);
+  reading._hit_streak_policy.hits_to_create = hits_to_create;
+  return reading;
+}
+
+geometry_msgs::Point CreationGatedVoxelPoint() {
+  return MakePoint(0.0, 0.0, 0.1);
+}
+
+void MarkCreationGatedObservation(TestableGrid* grid,
+                                  uint64_t observation_sequence_number) {
+  grid->Mark({MakeCreationGatedReading({CreationGatedVoxelPoint()},
+                                       observation_sequence_number)});
+}
+
+// Observations 1 through observation_count with none missed.
+void MarkCreationGatedObservations(TestableGrid* grid, int observation_count) {
+  for (int observation_sequence_number = 1;
+       observation_sequence_number <= observation_count;
+       ++observation_sequence_number) {
+    MarkCreationGatedObservation(grid, observation_sequence_number);
+  }
+}
+
+void MarkCreationGatedObservationAt(TestableGrid* grid,
+                                    uint64_t observation_sequence_number,
+                                    double seconds_after_first) {
+  observation::MeasurementReading reading = MakeCreationGatedReading(
+      {CreationGatedVoxelPoint()}, observation_sequence_number);
+  reading._cloud->header.stamp =
+      kObservationStamp + ros::Duration(seconds_after_first);
+  grid->Mark({reading});
+}
+
+void MarkCreationGatedCliffObservation(TestableGrid* grid,
+                                       uint64_t observation_sequence_number,
+                                       int hits_to_create) {
+  grid->Mark({MakeCreationGatedReading({CliffVoxelPoint()},
+                                       observation_sequence_number,
+                                       hits_to_create, VoxelClass::kCliff)});
 }
 
 TEST(VoxelClassTableTest, HitsToPromoteBelowOneRejected) {
@@ -249,6 +316,23 @@ TEST(PromotionGateTest, MissesToBreakOfOneNeedsEveryObservation) {
 
   EXPECT_EQ(grid->GetClassAt(CliffVoxelPoint()), VoxelClass::kGeneric)
       << "with misses_to_break 1 a single miss must start a new streak";
+}
+
+TEST(PromotionGateTest, HitsFartherApartThanSecondsToBreakStartANewStreak) {
+  auto grid = MakeGrid(MakeCliffTable(kDecayNever));
+  MarkCliffObservationAt(grid.get(), 1, 0.0);
+  MarkCliffObservationAt(grid.get(), 2, kFramePeriod);
+
+  // A camera stall: the next hit comes more than seconds_to_break later.
+  const double after_stall = kFramePeriod + kSecondsToBreak + kFramePeriod;
+  MarkCliffObservationAt(grid.get(), 3, after_stall);
+  EXPECT_EQ(grid->GetClassAt(CliffVoxelPoint()), VoxelClass::kGeneric)
+      << "hits from before the stall must not complete a promotion";
+
+  MarkCliffObservationAt(grid.get(), 4, after_stall + kFramePeriod);
+  MarkCliffObservationAt(grid.get(), 5, after_stall + 2 * kFramePeriod);
+  EXPECT_EQ(grid->GetClassAt(CliffVoxelPoint()), VoxelClass::kCliff)
+      << "the hit after the stall must start a new streak";
 }
 
 // A buffer with observation_persistence hands old observations over again.
@@ -432,6 +516,22 @@ TEST(PromotionGateTest, BrokenStreaksAreErasedAfterTheBatch) {
   EXPECT_EQ(grid->GetHitStreakCount(), 1u) << "only the fresh streak survives";
 }
 
+TEST(PromotionGateTest, StreaksPastSecondsToBreakAreErasedAfterTheBatch) {
+  auto grid = MakeGrid(MakeCliffTable(kDecayNever));
+  MarkCliffObservationAt(grid.get(), 1, 0.0);
+  ASSERT_EQ(grid->GetHitStreakCount(), 1u);
+
+  // The next observation misses the first voxel after a long stall.
+  observation::MeasurementReading reading =
+      MakeReading({MakePoint(1.0, 0.0, 0.1)}, VoxelClass::kCliff,
+                  /*observation_sequence_number=*/2);
+  reading._cloud->header.stamp =
+      kObservationStamp + ros::Duration(kSecondsToBreak + kFramePeriod);
+  grid->Mark({reading});
+
+  EXPECT_EQ(grid->GetHitStreakCount(), 1u) << "only the fresh streak survives";
+}
+
 // One hit short, so a promotion after the batch means the streak survived.
 TEST(PromotionGateTest, GenericReadingDoesNotEraseTheStreak) {
   auto grid = MakeGrid(MakeCliffTable(kDecayNever));
@@ -470,6 +570,252 @@ TEST(PromotionGateTest, ResetGridAreaErasesHitStreaks) {
 
   EXPECT_EQ(grid->GetClassAt(CliffVoxelPoint()), VoxelClass::kGeneric)
       << "hits from before a reset must not complete a promotion";
+}
+
+TEST(CreationGateTest, SingleObservationNoiseCreatesNoVoxel) {
+  auto grid = MakeGrid(MakeCliffTable(kDecayNever));
+
+  MarkCreationGatedObservation(grid.get(), 1);
+
+  EXPECT_FALSE(HasVoxelNear(grid.get(), 0.0, 0.0))
+      << "a voxel seen in one observation must not become an obstacle";
+}
+
+TEST(CreationGateTest, VoxelAppearsOnTheHitsToCreateHit) {
+  auto grid = MakeGrid(MakeCliffTable(kDecayNever));
+  MarkCreationGatedObservations(grid.get(), kHitsToCreate - 1);
+  ASSERT_FALSE(HasVoxelNear(grid.get(), 0.0, 0.0));
+
+  MarkCreationGatedObservation(grid.get(), kHitsToCreate);
+
+  EXPECT_TRUE(HasVoxelNear(grid.get(), 0.0, 0.0));
+  EXPECT_EQ(grid->GetClassAt(CreationGatedVoxelPoint()), VoxelClass::kGeneric);
+  EXPECT_EQ(grid->GetHitStreakCount(), 0u)
+      << "a created voxel with no promotion ahead must not keep a streak";
+}
+
+TEST(CreationGateTest, PointsInOneObservationCountAsOneHit) {
+  auto grid = MakeGrid(MakeCliffTable(kDecayNever));
+
+  grid->Mark({MakeCreationGatedReading(
+      {CreationGatedVoxelPoint(), MakePoint(0.001, 0.0, 0.1),
+       MakePoint(0.0, 0.001, 0.1)},
+      /*observation_sequence_number=*/1)});
+
+  EXPECT_FALSE(HasVoxelNear(grid.get(), 0.0, 0.0))
+      << "one observation counts once however many points hit the voxel";
+}
+
+TEST(CreationGateTest, MissesBelowMissesToBreakKeepTheStreak) {
+  auto grid = MakeGrid(MakeCliffTable(kDecayNever));
+
+  // One miss between hits stays below kMissesToBreak.
+  MarkCreationGatedObservation(grid.get(), 1);
+  MarkCreationGatedObservation(grid.get(), 3);
+  MarkCreationGatedObservation(grid.get(), 5);
+
+  EXPECT_TRUE(HasVoxelNear(grid.get(), 0.0, 0.0))
+      << "a miss below misses_to_break must keep the streak";
+}
+
+TEST(CreationGateTest, MissesReachingMissesToBreakStartANewStreak) {
+  auto grid = MakeGrid(MakeCliffTable(kDecayNever));
+  MarkCreationGatedObservations(grid.get(), kHitsToCreate - 1);
+
+  const int first_hit_after_break = kHitsToCreate - 1 + kMissesToBreak + 1;
+  MarkCreationGatedObservation(grid.get(), first_hit_after_break);
+  EXPECT_FALSE(HasVoxelNear(grid.get(), 0.0, 0.0))
+      << "hits from before the break must not create the voxel";
+
+  MarkCreationGatedObservation(grid.get(), first_hit_after_break + 1);
+  MarkCreationGatedObservation(grid.get(), first_hit_after_break + 2);
+  EXPECT_TRUE(HasVoxelNear(grid.get(), 0.0, 0.0))
+      << "the hit after the break must start a new streak";
+}
+
+TEST(CreationGateTest, HitsFartherApartThanSecondsToBreakStartANewStreak) {
+  auto grid = MakeGrid(MakeCliffTable(kDecayNever));
+  MarkCreationGatedObservationAt(grid.get(), 1, 0.0);
+  MarkCreationGatedObservationAt(grid.get(), 2, kFramePeriod);
+
+  // A camera stall: the next hit comes more than seconds_to_break later.
+  const double after_stall = kFramePeriod + kSecondsToBreak + kFramePeriod;
+  MarkCreationGatedObservationAt(grid.get(), 3, after_stall);
+  EXPECT_FALSE(HasVoxelNear(grid.get(), 0.0, 0.0))
+      << "hits from before the stall must not create the voxel";
+
+  MarkCreationGatedObservationAt(grid.get(), 4, after_stall + kFramePeriod);
+  MarkCreationGatedObservationAt(grid.get(), 5, after_stall + 2 * kFramePeriod);
+  EXPECT_TRUE(HasVoxelNear(grid.get(), 0.0, 0.0))
+      << "the hit after the stall must start a new streak";
+}
+
+TEST(CreationGateTest, StallShorterThanSecondsToBreakKeepsTheStreak) {
+  auto grid = MakeGrid(MakeCliffTable(kDecayNever));
+  MarkCreationGatedObservationAt(grid.get(), 1, 0.0);
+  MarkCreationGatedObservationAt(grid.get(), 2, kFramePeriod);
+
+  MarkCreationGatedObservationAt(grid.get(), 3, kSecondsToBreak);
+
+  EXPECT_TRUE(HasVoxelNear(grid.get(), 0.0, 0.0))
+      << "a stall shorter than seconds_to_break must keep the streak";
+}
+
+TEST(CreationGateTest, HitsExactlySecondsToBreakApartStartANewStreak) {
+  auto grid = MakeGrid(MakeCliffTable(kDecayNever));
+  MarkCreationGatedObservationAt(grid.get(), 1, 0.0);
+  MarkCreationGatedObservationAt(grid.get(), 2, 0.5);
+
+  MarkCreationGatedObservationAt(grid.get(), 3, 0.5 + kSecondsToBreak);
+
+  EXPECT_FALSE(HasVoxelNear(grid.get(), 0.0, 0.0))
+      << "a gap of seconds_to_break must break the streak, as "
+         "misses_to_break misses do";
+}
+
+TEST(CreationGateTest, HitStampedBeforeTheLastHitStartsANewStreak) {
+  auto grid = MakeGrid(MakeCliffTable(kDecayNever));
+  MarkCreationGatedObservationAt(grid.get(), 1, 0.0);
+  MarkCreationGatedObservationAt(grid.get(), 2, kFramePeriod);
+
+  // The clock jumped back, so the stamps no longer measure the gap.
+  MarkCreationGatedObservationAt(grid.get(), 3, -kSecondsToBreak);
+
+  EXPECT_FALSE(HasVoxelNear(grid.get(), 0.0, 0.0))
+      << "a hit stamped before the last hit must start a new streak";
+}
+
+TEST(CreationGateTest, MarkedVoxelSkipsTheGateAndRefreshes) {
+  auto grid = MakeGrid(MakeCliffTable(kDecayNever));
+  grid->Mark(
+      {MakeReading({CreationGatedVoxelPoint()}, VoxelClass::kGeneric,
+                   /*observation_sequence_number=*/1, kOtherSourceIndex)});
+  grid->AgeMark(CreationGatedVoxelPoint(), kMarkAgeBeyondDecay);
+
+  MarkCreationGatedObservation(grid.get(), 1);
+  RunDecayPass(grid.get());
+
+  EXPECT_TRUE(HasVoxelNear(grid.get(), 0.0, 0.0))
+      << "a hit on a marked voxel must refresh the voxel at once";
+  EXPECT_EQ(grid->GetHitStreakCount(), 0u)
+      << "a marked voxel needs no streak to stay marked";
+}
+
+TEST(CreationGateTest, VoxelRemovedByDecayMustPassTheGateAgain) {
+  auto grid = MakeGrid(MakeCliffTable(kDecayNever));
+  MarkCreationGatedObservations(grid.get(), kHitsToCreate);
+  grid->AgeMark(CreationGatedVoxelPoint(), kMarkAgeBeyondDecay);
+  RunDecayPass(grid.get());
+  ASSERT_FALSE(HasVoxelNear(grid.get(), 0.0, 0.0));
+
+  MarkCreationGatedObservation(grid.get(), kHitsToCreate + 1);
+
+  EXPECT_FALSE(HasVoxelNear(grid.get(), 0.0, 0.0))
+      << "a voxel removed by decay must earn hits_to_create again";
+}
+
+TEST(CreationGateTest, UnnumberedObservationCreatesTheVoxelAtOnce) {
+  auto grid = MakeGrid(MakeCliffTable(kDecayNever));
+
+  MarkCreationGatedObservation(grid.get(), /*observation_sequence_number=*/0);
+
+  EXPECT_TRUE(HasVoxelNear(grid.get(), 0.0, 0.0))
+      << "the creation gate must fail open on an unnumbered observation";
+  EXPECT_EQ(grid->GetHitStreakCount(), 0u);
+}
+
+TEST(CreationGateTest, CliffSourceCreatesThenPromotesOnOneStreak) {
+  auto grid = MakeGrid(MakeCliffTable(kDecayNever));
+  const int hits_to_create = kHitsToPromote - 1;
+
+  MarkCreationGatedCliffObservation(grid.get(), 1, hits_to_create);
+  EXPECT_FALSE(HasVoxelNear(grid.get(), 0.0, 0.0));
+
+  MarkCreationGatedCliffObservation(grid.get(), 2, hits_to_create);
+  EXPECT_TRUE(HasVoxelNear(grid.get(), 0.0, 0.0));
+  EXPECT_EQ(grid->GetClassAt(CliffVoxelPoint()), VoxelClass::kGeneric);
+
+  MarkCreationGatedCliffObservation(grid.get(), 3, hits_to_create);
+  EXPECT_EQ(grid->GetClassAt(CliffVoxelPoint()), VoxelClass::kCliff)
+      << "the hits that created the voxel must count toward the promotion";
+  EXPECT_EQ(grid->GetHitStreakCount(), 0u);
+}
+
+TEST(CreationGateTest, CreatingHitAlsoPromotesWhenPromotionNeedsNoMoreHits) {
+  auto grid = MakeGrid(MakeCliffTable(kDecayNever));
+  const int hits_to_create = kHitsToPromote;
+
+  MarkCreationGatedCliffObservation(grid.get(), 1, hits_to_create);
+  MarkCreationGatedCliffObservation(grid.get(), 2, hits_to_create);
+  ASSERT_FALSE(HasVoxelNear(grid.get(), 0.0, 0.0));
+
+  MarkCreationGatedCliffObservation(grid.get(), 3, hits_to_create);
+
+  EXPECT_EQ(grid->GetClassAt(CliffVoxelPoint()), VoxelClass::kCliff)
+      << "the voxel must go from unmarked straight to cliff";
+}
+
+TEST(CreationGateTest, DecayedVoxelWithAPromotionStreakReturnsOnTheNextHit) {
+  auto grid = MakeGrid(MakeCliffTable(kDecayNever));
+  const int hits_to_create = kHitsToPromote - 1;
+  MarkCreationGatedCliffObservation(grid.get(), 1, hits_to_create);
+  MarkCreationGatedCliffObservation(grid.get(), 2, hits_to_create);
+  ASSERT_EQ(grid->GetClassAt(CliffVoxelPoint()), VoxelClass::kGeneric);
+  grid->AgeMark(CliffVoxelPoint(), kMarkAgeBeyondDecay);
+  RunDecayPass(grid.get());
+  ASSERT_FALSE(HasVoxelNear(grid.get(), 0.0, 0.0));
+
+  MarkCreationGatedCliffObservation(grid.get(), 3, hits_to_create);
+
+  EXPECT_EQ(grid->GetClassAt(CliffVoxelPoint()), VoxelClass::kCliff)
+      << "a streak kept for promotion must pass the creation gate at once";
+}
+
+TEST(CreationGateTest, BrokenCreationStreaksAreErasedAfterTheBatch) {
+  auto grid = MakeGrid(MakeCliffTable(kDecayNever));
+  MarkCreationGatedObservation(grid.get(), 1);
+  ASSERT_EQ(grid->GetHitStreakCount(), 1u);
+
+  // The first voxel missed two observations: the next hit starts a new streak.
+  grid->Mark({MakeCreationGatedReading(
+      {MakePoint(1.0, 0.0, 0.1)},
+      /*observation_sequence_number=*/1 + kMissesToBreak)});
+
+  EXPECT_EQ(grid->GetHitStreakCount(), 1u) << "only the fresh streak survives";
+}
+
+TEST(CreationGateTest, ErasedSourceStreaksStartCreationOver) {
+  auto grid = MakeGrid(MakeCliffTable(kDecayNever));
+  MarkCreationGatedObservations(grid.get(), kHitsToCreate - 1);
+
+  grid->EraseHitStreaksOfSource(kCreationGatedSourceIndex);
+  MarkCreationGatedObservation(grid.get(), kHitsToCreate);
+
+  EXPECT_FALSE(HasVoxelNear(grid.get(), 0.0, 0.0))
+      << "hits from before the streaks were erased must not count";
+}
+
+TEST(CreationGateTest, ErasingOneSourceKeepsTheOtherSourcesStreaks) {
+  auto grid = MakeGrid(MakeCliffTable(kDecayNever));
+  MarkCreationGatedObservation(grid.get(), 1);
+  MarkCliffObservations(grid.get(), kHitsToPromote - 1);
+  ASSERT_EQ(grid->GetHitStreakCount(), 2u);
+
+  grid->EraseHitStreaksOfSource(kCreationGatedSourceIndex);
+  ASSERT_EQ(grid->GetHitStreakCount(), 1u);
+  MarkCliffObservation(grid.get(), kHitsToPromote);
+  EXPECT_EQ(grid->GetClassAt(CliffVoxelPoint()), VoxelClass::kCliff)
+      << "the cliff source's streak must survive";
+}
+
+TEST(CreationGateTest, ErasingAllHitStreaksDropsEverySourcesStreaks) {
+  auto grid = MakeGrid(MakeCliffTable(kDecayNever));
+  MarkCreationGatedObservation(grid.get(), 1);
+  MarkCliffObservations(grid.get(), 1);
+  ASSERT_EQ(grid->GetHitStreakCount(), 2u);
+
+  grid->EraseAllHitStreaks();
+  EXPECT_EQ(grid->GetHitStreakCount(), 0u);
 }
 
 TEST(ClassStoreAtZTest, CliffMarksAtAnyHeightLandInTheStoreAtZLayerAndPromote) {

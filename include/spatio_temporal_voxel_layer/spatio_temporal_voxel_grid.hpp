@@ -53,6 +53,7 @@
  *  - Per-voxel-class obstacle policies (per-class decay and clearing)
  *  - Frustums identified per observation source instead of sensor frame
  *  - Hit streak promotion gate (marked generic until promoted)
+ *  - Hit streak creation gate (unmarked until created)
  *  - Per-class voxel point cloud topics
  *  - ClearClassVoxels service (removes every voxel of one class)
  *  - Voxel grid wipe on pose reset or map change
@@ -235,6 +236,10 @@ class SpatioTemporalVoxelGrid {
   void ResetGridArea(const occupany_cell& start, const occupany_cell& end,
                      bool invert_area = false);
 
+  // Drop hit streaks, so the next hit of each affected source starts anew.
+  void EraseHitStreaksOfSource(std::size_t source_index);
+  void EraseAllHitStreaks(void);
+
   // Returns how many voxels were removed; kGeneric removes none.
   std::size_t ClearClassVoxels(VoxelClass cls);
 
@@ -307,12 +312,16 @@ class SpatioTemporalVoxelGrid {
     VoxelClass source_class = VoxelClass::kGeneric;
     int32_t hits = 0;
     uint64_t last_hit_observation_sequence_number = 0;
+    ros::Time last_hit_stamp;
     // Counts the observation once and returns the hits so far.
     int32_t RecordHit(uint64_t observation_sequence_number,
-                      int32_t misses_to_break);
-    // A hit at observation_sequence_number would start a new streak.
-    bool IsBrokenBefore(uint64_t observation_sequence_number,
-                        int32_t misses_to_break) const;
+                      const ros::Time& observation_stamp,
+                      const observation::HitStreakPolicy& hit_streak_policy);
+    // A hit at this observation would start a new streak.
+    bool IsBrokenBefore(
+        uint64_t observation_sequence_number,
+        const ros::Time& observation_stamp,
+        const observation::HitStreakPolicy& hit_streak_policy) const;
   };
   // One voxel as seen by one source.
   struct VoxelSourceKey {
@@ -330,19 +339,14 @@ class SpatioTemporalVoxelGrid {
              (key.source_index * kSourceIndexSpread);
     }
   };
-  // The newest observation of a source in a batch and the source's tolerance.
-  struct NewestSourceObservation {
-    uint64_t observation_sequence_number = 0;
-    int32_t misses_to_break = 1;
-  };
-
   // Counts the observation in the source's streak on pt and returns the hits.
   int32_t RecordVoxelHit(const openvdb::Coord& pt,
                          const observation::MeasurementReading& obs) const;
   void EraseHitStreak(const openvdb::Coord& pt, std::size_t source_index) const;
   void EraseBrokenHitStreaks(
-      const std::unordered_map<std::size_t, NewestSourceObservation>&
-          newest_observation_by_source);
+      const std::unordered_map<std::size_t,
+                               const observation::MeasurementReading*>&
+          newest_reading_by_source);
 
   // Check occupancy status of the grid
   bool IsGridEmpty(void) const;

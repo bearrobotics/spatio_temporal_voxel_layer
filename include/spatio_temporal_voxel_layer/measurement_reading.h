@@ -85,9 +85,17 @@
 namespace observation {
 
 struct HitStreakPolicy {
+  // Hits in a voxel's hit streak from this source needed to create the voxel.
+  int32_t hits_to_create = 1;
   // Consecutive misses that break a voxel's hit streak from this source.
   int32_t misses_to_break = 1;
+  // Cloud stamp gap between two read hits that breaks a voxel's hit streak.
+  double seconds_to_break = 0.5;
 };
+
+inline bool IsCreationGated(const HitStreakPolicy& hit_streak_policy) {
+  return hit_streak_policy.hits_to_create > 1;
+}
 
 // Measurement Reading
 struct MeasurementReading {

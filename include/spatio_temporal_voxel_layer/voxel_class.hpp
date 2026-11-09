@@ -93,6 +93,10 @@ struct VoxelClassPolicy {
   [[nodiscard]] bool IsValid() const;
 };
 
+inline bool IsPromotionGated(const VoxelClassPolicy& policy) {
+  return policy.hits_to_promote > 1;
+}
+
 // Immutable per-class policy lookup, built once at startup.
 class VoxelClassTable {
  public:

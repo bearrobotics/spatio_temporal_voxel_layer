@@ -430,10 +430,12 @@ cc_ros_test(
     launch_file = "test/test_layer_voxel_class_params.test",
     deps = [
         ":spatio_temporal_voxel_layer_plugin",
+        ":test_utils",
         "//ROS/external/navigation/costmap_2d",
         "//bear_msgs:cc_bear_msgs",
         "//third_party/ros:roscpp",
         "@gtests//:gtest",
+        "@ros_comm_msgs//:cc_std_srvs",
     ],
 )
 

@@ -50,6 +50,7 @@
  *  - Safety zone frustum support
  *  - Per-voxel-class obstacle policies (per-class decay and clearing)
  *  - Hit streak promotion gate (marked generic until promoted)
+ *  - Hit streak creation gate (unmarked until created)
  *  - Per-class voxel point cloud topics
  *  - ClearClassVoxels service (removes every voxel of one class)
  *  - Voxel grid wipe on pose reset or map change
@@ -129,6 +130,24 @@ std::optional<int> LoadHitStreakThreshold(const ros::NodeHandle& nh,
   return threshold;
 }
 
+// Raw read first: a non-number must stop the layer, not count as unset.
+std::optional<double> LoadSecondsToBreak(const ros::NodeHandle& hit_streak_nh) {
+  XmlRpc::XmlRpcValue raw;
+  if (!hit_streak_nh.getParam("seconds_to_break", raw)) {
+    return std::nullopt;
+  }
+  double seconds_to_break = 0.0;
+  if (!hit_streak_nh.getParam("seconds_to_break", seconds_to_break) ||
+      !std::isfinite(seconds_to_break) || seconds_to_break <= 0.0) {
+    ROS_FATAL_STREAM(hit_streak_nh.getNamespace()
+                     << "/seconds_to_break must be a positive finite number, "
+                        "got "
+                     << raw.toXml());
+    std::terminate();
+  }
+  return seconds_to_break;
+}
+
 std::optional<observation::HitStreakPolicy> LoadHitStreakPolicy(
     const ros::NodeHandle& source_nh) {
   if (!source_nh.hasParam("hit_streak")) {
@@ -144,6 +163,14 @@ std::optional<observation::HitStreakPolicy> LoadHitStreakPolicy(
   }
   observation::HitStreakPolicy hit_streak_policy;
   hit_streak_policy.misses_to_break = *misses_to_break;
+  if (const std::optional<int> hits_to_create = LoadHitStreakThreshold(
+          hit_streak_nh, "hits_to_create", /*lowest_allowed=*/1)) {
+    hit_streak_policy.hits_to_create = *hits_to_create;
+  }
+  if (const std::optional<double> seconds_to_break =
+          LoadSecondsToBreak(hit_streak_nh)) {
+    hit_streak_policy.seconds_to_break = *seconds_to_break;
+  }
   return hit_streak_policy;
 }
 
@@ -193,6 +220,15 @@ void LoadVoxelClasses(ros::NodeHandle& nh, VoxelClassTable::Config& config) {
 
     config.rows.push_back({cls, policy});
   }
+}
+
+// The tf filter can still hold frames that reached it before the reset.
+void ClearReceivedObservations(tf2_ros::MessageFilterBase& notifier,
+                               buffer::MeasurementBuffer& buffer) {
+  notifier.clear();
+  buffer.Lock();
+  buffer.ResetAllMeasurements();
+  buffer.Unlock();
 }
 
 }  // namespace
@@ -547,7 +583,10 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
         configured_hit_streak_policy = LoadHitStreakPolicy(source_node);
     const observation::HitStreakPolicy hit_streak_policy =
         configured_hit_streak_policy.value_or(observation::HitStreakPolicy{});
-    const bool is_hit_streak_gated = marking && class_hits_to_promote > 1;
+    const bool is_hit_streak_gated =
+        marking &&
+        (observation::IsCreationGated(hit_streak_policy) ||
+         volume_grid::IsPromotionGated(class_table->GetPolicy(*voxel_class)));
     if (is_hit_streak_gated && !configured_hit_streak_policy) {
       ROS_FATAL_STREAM("Source '" << source
                                   << "': hit_streak/misses_to_break is "
@@ -559,8 +598,8 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
     if (configured_hit_streak_policy && !is_hit_streak_gated) {
       ROS_WARN_STREAM("Source '" << source
                                  << "': hit_streak is unused unless the source "
-                                    "marks and the class's hits_to_promote "
-                                    "exceeds 1.");
+                                    "marks and either hits_to_create or the "
+                                    "class's hits_to_promote exceeds 1.");
     }
     const std::size_t source_index = _observation_buffers.size();
 
@@ -635,7 +674,13 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
 
     serv_callback = boost::bind(
         &SpatioTemporalVoxelLayer::BufferEnablerCallback, this, _1, _2,
-        _observation_buffers.back(), _observation_subscribers.back());
+        _observation_buffers.back(), _observation_subscribers.back(),
+        _observation_notifiers.back(), source_index, is_hit_streak_gated);
+
+    if (is_hit_streak_gated) {
+      _hit_streak_gated_sources.push_back(
+          {_observation_buffers.back(), _observation_notifiers.back()});
+    }
 
     std::string toggle_topic = source + "/toggle_enabled";
     server = nh.advertiseService(toggle_topic, serv_callback);
@@ -834,10 +879,13 @@ void SpatioTemporalVoxelLayer::PointCloud2Callback(
 bool SpatioTemporalVoxelLayer::BufferEnablerCallback(
     std_srvs::SetBool::Request& request, std_srvs::SetBool::Response& response,
     boost::shared_ptr<buffer::MeasurementBuffer>& buffer,
-    boost::shared_ptr<message_filters::SubscriberBase>& subcriber)
+    boost::shared_ptr<message_filters::SubscriberBase>& subcriber,
+    boost::shared_ptr<tf2_ros::MessageFilterBase>& notifier,
+    std::size_t source_index, bool is_hit_streak_gated)
 /*****************************************************************************/
 {
   buffer->Lock();
+  const bool is_disabling_source = buffer->IsEnabled() && !request.data;
   if (buffer->IsEnabled() != request.data) {
     buffer->SetEnabled(request.data);
     if (request.data) {
@@ -852,6 +900,13 @@ bool SpatioTemporalVoxelLayer::BufferEnablerCallback(
     response.message = "Sensor already in the required state doing nothing";
   }
   buffer->Unlock();
+  if (is_disabling_source && is_hit_streak_gated) {
+    // A hit streak must not span the period the source is disabled.
+    // Held so an update cannot mark a reading copied out before the reset.
+    boost::recursive_mutex::scoped_lock lock(_voxel_grid_lock);
+    ClearReceivedObservations(*notifier, *buffer);
+    _voxel_grid->EraseHitStreaksOfSource(source_index);
+  }
   response.success = true;
   return response.success;
 }
@@ -944,6 +999,15 @@ void SpatioTemporalVoxelLayer::activate(void)
 {
   // subscribe and place info in buffers from sensor sources
   ROS_INFO("%s was activated.", getName().c_str());
+
+  // A hit streak must not span the period the layer was inactive.
+  {
+    boost::recursive_mutex::scoped_lock lock(_voxel_grid_lock);
+    for (const HitStreakGatedSource& source : _hit_streak_gated_sources) {
+      ClearReceivedObservations(*source.notifier, *source.buffer);
+    }
+    _voxel_grid->EraseAllHitStreaks();
+  }
 
   observation_subscribers_iter sub_it = _observation_subscribers.begin();
   for (sub_it; sub_it != _observation_subscribers.end(); ++sub_it) {

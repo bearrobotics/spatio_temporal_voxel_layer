@@ -51,6 +51,7 @@
  *  - Per-voxel-class obstacle policies (per-class decay and clearing)
  *  - Frustums identified per observation source instead of sensor frame
  *  - Hit streak promotion gate (marked generic until promoted)
+ *  - Hit streak creation gate (unmarked until created)
  *  - Per-class voxel point cloud topics
  *  - ClearClassVoxels service (removes every voxel of one class)
  *  - Voxel grid wipe on pose reset or map change
@@ -625,8 +626,8 @@ void SpatioTemporalVoxelGrid::Mark(
 {
   boost::unique_lock<boost::mutex> lock(_grid_lock);
 
-  std::unordered_map<std::size_t, NewestSourceObservation>
-      newest_observation_by_source;
+  std::unordered_map<std::size_t, const observation::MeasurementReading*>
+      newest_reading_by_source;
 
   // Buffers list observations newest first; streaks count oldest first.
   // tbb::parallel_do(marking_readings, *this); /*must do via merged trees*/
@@ -634,18 +635,18 @@ void SpatioTemporalVoxelGrid::Mark(
        GetReadingsOldestFirstPerSource(marking_readings)) {
     (*this)(*reading);
 
+    const bool is_creation_gated =
+        observation::IsCreationGated(reading->_hit_streak_policy);
     const bool is_promotion_gated =
-        _class_table.GetPolicy(reading->_voxel_class).hits_to_promote > 1;
-    if (reading->_marking && is_promotion_gated) {
+        IsPromotionGated(_class_table.GetPolicy(reading->_voxel_class));
+    if (reading->_marking && (is_creation_gated || is_promotion_gated)) {
       // Readings of a source come oldest first, so the last is the newest.
-      newest_observation_by_source[reading->_source_index] = {
-          reading->_observation_sequence_number,
-          reading->_hit_streak_policy.misses_to_break};
+      newest_reading_by_source[reading->_source_index] = reading;
     }
   }
 
-  if (!newest_observation_by_source.empty()) {
-    EraseBrokenHitStreaks(newest_observation_by_source);
+  if (!newest_reading_by_source.empty()) {
+    EraseBrokenHitStreaks(newest_reading_by_source);
   }
   return;
 }
@@ -666,13 +667,17 @@ void SpatioTemporalVoxelGrid::operator()(
   const VoxelClass source_class = obs._voxel_class;
   const VoxelClassPolicy& source_policy = _class_table.GetPolicy(source_class);
   const int32_t source_priority = source_policy.priority;
-  const bool is_promotion_gated = source_policy.hits_to_promote > 1;
+  const bool is_promotion_gated = IsPromotionGated(source_policy);
+  const bool is_creation_gated =
+      observation::IsCreationGated(obs._hit_streak_policy);
   // Only the buffer numbers observations; unnumbered ones start no streak.
   const bool is_observation_numbered = obs._observation_sequence_number != 0;
-  if (is_promotion_gated && !is_observation_numbered) {
+  if ((is_promotion_gated || is_creation_gated) && !is_observation_numbered) {
     ROS_ERROR_THROTTLE(5.0,
                        "Source '%s' delivered an unnumbered observation; the "
-                       "observation counts toward no hit streak.",
+                       "observation counts toward no hit streak, so the "
+                       "observation marks without the creation gate and "
+                       "promotes no voxel.",
                        obs._source_name.c_str());
   }
   const std::optional<double>& store_at_z = source_policy.store_at_z;
@@ -720,11 +725,27 @@ void SpatioTemporalVoxelGrid::operator()(
       continue;
     }
 
+    // Set when the creation gate already recorded this observation's hit.
+    std::optional<int32_t> recorded_hits;
+    // The creation gate fails open on an unnumbered observation.
+    if (is_creation_gated && is_observation_numbered &&
+        !value_accessor.isValueOn(coord)) {
+      recorded_hits = RecordVoxelHit(coord, obs);
+      if (*recorded_hits < obs._hit_streak_policy.hits_to_create) {
+        continue;
+      }
+      // Once the voxel exists, only promotion reads the streak.
+      if (!is_promotion_gated) {
+        EraseHitStreak(coord, obs._source_index);
+      }
+    }
+
     VoxelClass mark_class = source_class;
     if (is_promotion_gated && source_priority > current_priority) {
       const bool passes_promotion_gate =
           is_observation_numbered &&
-          RecordVoxelHit(coord, obs) >= source_policy.hits_to_promote;
+          (recorded_hits ? *recorded_hits : RecordVoxelHit(coord, obs)) >=
+              source_policy.hits_to_promote;
       if (passes_promotion_gate) {
         EraseHitStreak(coord, obs._source_index);
       } else if (current_class != VoxelClass::kGeneric) {
@@ -843,6 +864,28 @@ bool SpatioTemporalVoxelGrid::ResetGrid(void)
   return false;
 }
 
+/*****************************************************************************/
+void SpatioTemporalVoxelGrid::EraseHitStreaksOfSource(std::size_t source_index)
+/*****************************************************************************/
+{
+  boost::unique_lock<boost::mutex> lock(_grid_lock);
+  for (auto it = _hit_streaks.begin(); it != _hit_streaks.end();) {
+    if (it->first.source_index == source_index) {
+      it = _hit_streaks.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
+/*****************************************************************************/
+void SpatioTemporalVoxelGrid::EraseAllHitStreaks(void)
+/*****************************************************************************/
+{
+  boost::unique_lock<boost::mutex> lock(_grid_lock);
+  _hit_streaks.clear();
+}
+
 /*****************************************************************************************************************/
 void SpatioTemporalVoxelGrid::ResetGridArea(const occupany_cell& start,
                                             const occupany_cell& end,
@@ -948,7 +991,7 @@ int32_t SpatioTemporalVoxelGrid::RecordVoxelHit(
                        VoxelHitStreak{obs._voxel_class})
           .first->second;
   return streak.RecordHit(obs._observation_sequence_number,
-                          obs._hit_streak_policy.misses_to_break);
+                          obs._cloud->header.stamp, obs._hit_streak_policy);
 }
 
 /*****************************************************************************/
@@ -961,7 +1004,8 @@ void SpatioTemporalVoxelGrid::EraseHitStreak(const openvdb::Coord& pt,
 
 /*****************************************************************************/
 int32_t SpatioTemporalVoxelGrid::VoxelHitStreak::RecordHit(
-    uint64_t observation_sequence_number, int32_t misses_to_break)
+    uint64_t observation_sequence_number, const ros::Time& observation_stamp,
+    const observation::HitStreakPolicy& hit_streak_policy)
 /*****************************************************************************/
 {
   // Observations at or below the last hit were counted already.
@@ -970,15 +1014,18 @@ int32_t SpatioTemporalVoxelGrid::VoxelHitStreak::RecordHit(
     return hits;
   }
   const bool streak_continues =
-      hits > 0 && !IsBrokenBefore(observation_sequence_number, misses_to_break);
+      hits > 0 && !IsBrokenBefore(observation_sequence_number,
+                                  observation_stamp, hit_streak_policy);
   hits = streak_continues ? hits + 1 : 1;
   last_hit_observation_sequence_number = observation_sequence_number;
+  last_hit_stamp = observation_stamp;
   return hits;
 }
 
 /*****************************************************************************/
 bool SpatioTemporalVoxelGrid::VoxelHitStreak::IsBrokenBefore(
-    uint64_t observation_sequence_number, int32_t misses_to_break) const
+    uint64_t observation_sequence_number, const ros::Time& observation_stamp,
+    const observation::HitStreakPolicy& hit_streak_policy) const
 /*****************************************************************************/
 {
   if (observation_sequence_number <= last_hit_observation_sequence_number) {
@@ -987,28 +1034,40 @@ bool SpatioTemporalVoxelGrid::VoxelHitStreak::IsBrokenBefore(
   // Every observation between the last hit and this hit is a miss.
   const uint64_t consecutive_misses =
       observation_sequence_number - last_hit_observation_sequence_number - 1;
-  return consecutive_misses >= static_cast<uint64_t>(misses_to_break);
+  if (consecutive_misses >=
+      static_cast<uint64_t>(hit_streak_policy.misses_to_break)) {
+    return true;
+  }
+  // A stamp before the last hit means the clock jumped back.
+  const double seconds_since_last_hit =
+      (observation_stamp - last_hit_stamp).toSec();
+  return seconds_since_last_hit < 0.0 ||
+         seconds_since_last_hit >= hit_streak_policy.seconds_to_break;
 }
 
 /*****************************************************************************/
 void SpatioTemporalVoxelGrid::EraseBrokenHitStreaks(
-    const std::unordered_map<std::size_t, NewestSourceObservation>&
-        newest_observation_by_source)
+    const std::unordered_map<std::size_t,
+                             const observation::MeasurementReading*>&
+        newest_reading_by_source)
 /*****************************************************************************/
 {
   // A streak the next hit would not continue holds nothing worth keeping.
   for (auto it = _hit_streaks.begin(); it != _hit_streaks.end();) {
-    const auto newest_observation =
-        newest_observation_by_source.find(it->first.source_index);
-    if (newest_observation == newest_observation_by_source.end()) {
+    const auto newest_reading_entry =
+        newest_reading_by_source.find(it->first.source_index);
+    if (newest_reading_entry == newest_reading_by_source.end()) {
       ++it;
       continue;
     }
+    const observation::MeasurementReading& newest_reading =
+        *newest_reading_entry->second;
     // The earliest next hit is the observation after the batch's newest.
     const uint64_t next_observation_sequence_number =
-        newest_observation->second.observation_sequence_number + 1;
+        newest_reading._observation_sequence_number + 1;
     if (it->second.IsBrokenBefore(next_observation_sequence_number,
-                                  newest_observation->second.misses_to_break)) {
+                                  newest_reading._cloud->header.stamp,
+                                  newest_reading._hit_streak_policy)) {
       it = _hit_streaks.erase(it);
     } else {
       ++it;

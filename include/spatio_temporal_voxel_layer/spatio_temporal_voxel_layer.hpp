@@ -51,6 +51,7 @@
  *  - Safety zone frustum support
  *  - Per-voxel-class obstacle policies (per-class decay and clearing)
  *  - Hit streak promotion gate (marked generic until promoted)
+ *  - Hit streak creation gate (unmarked until created)
  *  - Per-class voxel point cloud topics
  *  - ClearClassVoxels service (removes every voxel of one class)
  *  - Voxel grid wipe on pose reset or map change
@@ -226,6 +227,11 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
                                 bear_msgs::ClearClassVoxels::Response& resp);
 
  private:
+  struct HitStreakGatedSource {
+    boost::shared_ptr<buffer::MeasurementBuffer> buffer;
+    boost::shared_ptr<tf2_ros::MessageFilterBase> notifier;
+  };
+
   void PoseResetCallback(const std_msgs::String::ConstPtr& message);
 
   void ResetGridAndReadings(void);
@@ -307,7 +313,9 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
       std_srvs::SetBool::Request& request,
       std_srvs::SetBool::Response& response,
       boost::shared_ptr<buffer::MeasurementBuffer>& buffer,
-      boost::shared_ptr<message_filters::SubscriberBase>& subcriber);
+      boost::shared_ptr<message_filters::SubscriberBase>& subcriber,
+      boost::shared_ptr<tf2_ros::MessageFilterBase>& notifier,
+      std::size_t source_index, bool is_hit_streak_gated);
 
   /**
    * @brief Publishes a visualization marker for a detected blind spot point.
@@ -330,6 +338,7 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
       _observation_buffers;
   std::vector<boost::shared_ptr<buffer::MeasurementBuffer> > _marking_buffers;
   std::vector<boost::shared_ptr<buffer::MeasurementBuffer> > _clearing_buffers;
+  std::vector<HitStreakGatedSource> _hit_streak_gated_sources;
   std::vector<ros::ServiceServer> _buffer_enabler_servers;
   dynamicReconfigureServerType* _dynamic_reconfigure_server = nullptr;
 

@@ -168,6 +168,71 @@ hit_streak_on_ungated_source:
     hit_streak:
       misses_to_break: 2
 
+creation_gated_source:
+  <<: *layer_defaults
+  camera_source:
+    <<: *source_defaults
+    hit_streak:
+      hits_to_create: 3
+      misses_to_break: 2
+
+zero_seconds_to_break:
+  <<: *layer_defaults
+  camera_source:
+    <<: *source_defaults
+    hit_streak:
+      hits_to_create: 3
+      misses_to_break: 2
+      seconds_to_break: 0.0
+
+string_seconds_to_break:
+  <<: *layer_defaults
+  camera_source:
+    <<: *source_defaults
+    hit_streak:
+      hits_to_create: 3
+      misses_to_break: 2
+      seconds_to_break: "1.5"
+
+nan_seconds_to_break:
+  <<: *layer_defaults
+  camera_source:
+    <<: *source_defaults
+    hit_streak:
+      hits_to_create: 3
+      misses_to_break: 2
+      seconds_to_break: .nan
+
+hit_streak_reset:
+  <<: *layer_defaults
+  observation_sources: "gated_camera"
+  gated_camera:
+    <<: *source_defaults
+    topic: /stvl_layer_params_test/hit_streak_reset_frames
+    sensor_frame: ""
+    clearing: false
+    clear_after_reading: false
+    hit_streak:
+      hits_to_create: 3
+      misses_to_break: 1
+      seconds_to_break: 2
+
+zero_hits_to_create:
+  <<: *layer_defaults
+  camera_source:
+    <<: *source_defaults
+    hit_streak:
+      hits_to_create: 0
+      misses_to_break: 2
+
+string_hits_to_create:
+  <<: *layer_defaults
+  camera_source:
+    <<: *source_defaults
+    hit_streak:
+      hits_to_create: "3"
+      misses_to_break: 2
+
 cliff_without_store_at_z:
   <<: *layer_defaults
   voxel_classes:

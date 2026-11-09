@@ -75,13 +75,14 @@ observation::MeasurementReading MakeReading(
   reading._clearing = false;
   reading._obstacle_range_in_m = 100.0;
   reading._voxel_class = voxel_class;
+  // No voxel is marked twice here, so one cloud number serves every reading.
+  reading._observation_sequence_number = 1;
   return reading;
 }
 
 struct CliffOptions {
   bool publish_class_voxels = true;
-  int confirmation_frames = 1;
-  double confirmation_window_seconds = 0.0;
+  int hits_to_promote = 1;
 };
 
 std::optional<VoxelClassTable> MakeCliffTable(const CliffOptions& options) {
@@ -91,8 +92,7 @@ std::optional<VoxelClassTable> MakeCliffTable(const CliffOptions& options) {
   row.voxel_class = VoxelClass::kCliff;
   row.policy.decay_seconds = kLongDecaySeconds;
   row.policy.priority = 10;
-  row.policy.confirmation_frames = options.confirmation_frames;
-  row.policy.confirmation_window_seconds = options.confirmation_window_seconds;
+  row.policy.hits_to_promote = options.hits_to_promote;
   row.policy.cleared_by_frustums = false;
   row.policy.cleared_by_dynamic_obstacles = false;
   row.policy.cleared_by_footprint_clear = false;
@@ -320,18 +320,17 @@ TEST(ClassClearTest, ClearClassVoxelsIgnoresGeneric) {
       << "a clear must never remove a voxel that carries no class";
 }
 
-TEST(ClassClearTest, ClearClassVoxelsDropsPendingPromotionEvidence) {
+TEST(ClassClearTest, ClearClassVoxelsErasesTheClassHitStreaks) {
   CliffOptions options;
-  options.confirmation_frames = 3;
-  options.confirmation_window_seconds = 1.0;
+  options.hits_to_promote = 3;
   auto grid = MakeGrid(MakeCliffTable(options));
   grid->Mark({MakeReading({CliffVoxelPoint()}, VoxelClass::kCliff)});
-  ASSERT_EQ(grid->GetPendingPromotionCount(), 1u);
+  ASSERT_EQ(grid->GetHitStreakCount(), 1u);
 
   grid->ClearClassVoxels(VoxelClass::kCliff);
 
-  EXPECT_EQ(grid->GetPendingPromotionCount(), 0u)
-      << "a cleared voxel must not return from evidence left behind";
+  EXPECT_EQ(grid->GetHitStreakCount(), 0u)
+      << "a cleared voxel must not return from a streak left behind";
 }
 
 TEST(ClassClearTest, FlattenedCostmapDropsAClearedVoxel) {

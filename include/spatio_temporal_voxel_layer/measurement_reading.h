@@ -75,12 +75,19 @@
 #include <geometry_msgs/Quaternion.h>
 #include <sensor_msgs/PointCloud2.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 
 #include "spatio_temporal_voxel_layer/frustum_factory.h"
 #include "spatio_temporal_voxel_layer/voxel_class.hpp"
 
 namespace observation {
+
+struct HitStreakPolicy {
+  // Consecutive misses that break a voxel's hit streak from this source.
+  int32_t misses_to_break = 1;
+};
 
 // Measurement Reading
 struct MeasurementReading {
@@ -123,6 +130,9 @@ struct MeasurementReading {
         _orientation(obs._orientation),
         _decay_acceleration(obs._decay_acceleration),
         _voxel_class(obs._voxel_class),
+        _source_index(obs._source_index),
+        _observation_sequence_number(obs._observation_sequence_number),
+        _hit_streak_policy(obs._hit_streak_policy),
         _frustrum_factory(obs._frustrum_factory) {}
 
   geometry_msgs::Point _origin;
@@ -135,6 +145,11 @@ struct MeasurementReading {
   double _clearing;
   double _decay_acceleration;
   volume_grid::VoxelClass _voxel_class = volume_grid::VoxelClass::kGeneric;
+  // Position of the source in observation_sources; keys per-source state.
+  std::size_t _source_index = 0;
+  // Nth observation the grid read for marking; 0 until assigned.
+  uint64_t _observation_sequence_number = 0;
+  HitStreakPolicy _hit_streak_policy;
   FrustumFactoryFactory::FrustumFactory _frustrum_factory;
 };
 

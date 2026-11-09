@@ -29,6 +29,7 @@
 #include <sensor_msgs/PointCloud2.h>
 #include <tf2_ros/buffer.h>
 
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
@@ -53,6 +54,8 @@ constexpr char kCliffSourceName[] = "gemini_down_cliff";
 constexpr char kSensorFrame[] = "camera";
 constexpr double kSensorX = 1.0;
 constexpr double kSensorY = 2.0;
+constexpr std::size_t kSourceIndex = 2;
+constexpr int kMissesToBreak = 2;
 const ros::Time kCloudStamp(1.0);
 
 geometry_msgs::Point MakePoint(double x, double y, double z) {
@@ -61,6 +64,12 @@ geometry_msgs::Point MakePoint(double x, double y, double z) {
   p.y = y;
   p.z = z;
   return p;
+}
+
+observation::HitStreakPolicy MakeHitStreakPolicy() {
+  observation::HitStreakPolicy hit_streak_policy;
+  hit_streak_policy.misses_to_break = kMissesToBreak;
+  return hit_streak_policy;
 }
 
 class MeasurementBufferTest : public ::testing::Test {
@@ -78,28 +87,38 @@ class MeasurementBufferTest : public ::testing::Test {
 
   std::unique_ptr<buffer::MeasurementBuffer> MakeBuffer(
       bool marking, bool clearing, VoxelClass voxel_class,
-      const std::string& source_name = kSourceName) {
+      const std::string& source_name = kSourceName,
+      double observation_keep_time = 0.0) {
     // Zero keep time and rate: keep only the latest cloud, never check
     // staleness.
     return std::make_unique<buffer::MeasurementBuffer>(
-        "/unused/points", source_name, /*observation_keep_time=*/0.0,
+        "/unused/points", source_name, observation_keep_time,
         /*expected_update_rate=*/0.0, /*obstacle_range=*/5.0, tf_buffer_,
         kGlobalFrame, kSensorFrame, /*tf_tolerance=*/0.1,
         /*decay_acceleration=*/0.0, marking, clearing, voxel_class,
-        test_utils::kVoxelSize, std::make_unique<PassthroughFilter>(),
+        kSourceIndex, MakeHitStreakPolicy(), test_utils::kVoxelSize,
+        std::make_unique<PassthroughFilter>(),
         /*enabled=*/true, /*clear_buffer_after_reading=*/false,
         FrustumFactoryFactory::FrustumFactory{});
   }
 
   static sensor_msgs::PointCloud2 MakeSensorCloud(
-      const std::vector<geometry_msgs::Point>& points) {
+      const std::vector<geometry_msgs::Point>& points,
+      const ros::Time& stamp = kCloudStamp) {
     sensor_msgs::PointCloud2 cloud = test_utils::MakePointCloud(points);
     cloud.header.frame_id = kSensorFrame;
-    cloud.header.stamp = kCloudStamp;
+    cloud.header.stamp = stamp;
     return cloud;
   }
 
-  static std::vector<observation::MeasurementReading> ReadingsOf(
+  static std::vector<observation::MeasurementReading> MarkingReadingsOf(
+      buffer::MeasurementBuffer& buffer) {
+    std::vector<observation::MeasurementReading> readings;
+    buffer.GetMarkingReadings(readings);
+    return readings;
+  }
+
+  static std::vector<observation::MeasurementReading> ClearingReadingsOf(
       buffer::MeasurementBuffer& buffer) {
     std::vector<observation::MeasurementReading> readings;
     buffer.GetReadings(readings);
@@ -118,7 +137,7 @@ TEST_F(MeasurementBufferTest, ReadingCarriesTheSourceVoxelClass) {
   buffer->BufferROSCloud(MakeSensorCloud({MakePoint(0.5, 0.0, 0.1)}));
 
   const std::vector<observation::MeasurementReading> readings =
-      ReadingsOf(*buffer);
+      MarkingReadingsOf(*buffer);
   ASSERT_EQ(readings.size(), 1u);
   EXPECT_EQ(readings[0]._voxel_class, VoxelClass::kCliff);
   EXPECT_TRUE(readings[0]._marking);
@@ -136,9 +155,88 @@ TEST_F(MeasurementBufferTest, ReadingCarriesSourceNameNotSensorFrame) {
   buffer->BufferROSCloud(MakeSensorCloud({MakePoint(1.0, 0.0, 0.0)}));
 
   const std::vector<observation::MeasurementReading> readings =
-      ReadingsOf(*buffer);
+      MarkingReadingsOf(*buffer);
   ASSERT_EQ(readings.size(), 1u);
   EXPECT_EQ(readings[0]._source_name, kCliffSourceName);
+}
+
+TEST_F(MeasurementBufferTest, ReadingCarriesTheSourceIndexAndHitStreakPolicy) {
+  std::unique_ptr<buffer::MeasurementBuffer> buffer =
+      MakeBuffer(/*marking=*/true, /*clearing=*/false, VoxelClass::kCliff);
+
+  buffer->BufferROSCloud(MakeSensorCloud({MakePoint(0.5, 0.0, 0.1)}));
+
+  const std::vector<observation::MeasurementReading> readings =
+      MarkingReadingsOf(*buffer);
+  ASSERT_EQ(readings.size(), 1u);
+  EXPECT_EQ(readings[0]._source_index, kSourceIndex);
+  EXPECT_EQ(readings[0]._hit_streak_policy.misses_to_break, kMissesToBreak);
+}
+
+TEST_F(MeasurementBufferTest,
+       ObservationsAreNumberedFromOneWhenReadForMarking) {
+  std::unique_ptr<buffer::MeasurementBuffer> buffer =
+      MakeBuffer(/*marking=*/true, /*clearing=*/false, VoxelClass::kCliff);
+
+  buffer->BufferROSCloud(MakeSensorCloud({MakePoint(0.5, 0.0, 0.1)}));
+  ASSERT_EQ(MarkingReadingsOf(*buffer).size(), 1u);
+  EXPECT_EQ(MarkingReadingsOf(*buffer)[0]._observation_sequence_number, 1u);
+
+  // A zero keep time keeps only the newest cloud.
+  buffer->BufferROSCloud(MakeSensorCloud({MakePoint(0.5, 0.0, 0.1)}));
+  ASSERT_EQ(MarkingReadingsOf(*buffer).size(), 1u);
+  EXPECT_EQ(MarkingReadingsOf(*buffer)[0]._observation_sequence_number, 2u);
+}
+
+// An observation replaced before a read was never evaluated, so not a miss.
+TEST_F(MeasurementBufferTest,
+       AnObservationReplacedBeforeAMarkingReadIsNotNumbered) {
+  std::unique_ptr<buffer::MeasurementBuffer> buffer =
+      MakeBuffer(/*marking=*/true, /*clearing=*/false, VoxelClass::kCliff);
+
+  buffer->BufferROSCloud(MakeSensorCloud({MakePoint(0.5, 0.0, 0.1)}));
+  buffer->BufferROSCloud(MakeSensorCloud({MakePoint(0.5, 0.0, 0.1)}));
+
+  const std::vector<observation::MeasurementReading> readings =
+      MarkingReadingsOf(*buffer);
+  ASSERT_EQ(readings.size(), 1u);
+  EXPECT_EQ(readings[0]._observation_sequence_number, 1u);
+}
+
+// The clearing pass reads a marking source too; only marking may number.
+TEST_F(MeasurementBufferTest, AClearingReadLeavesObservationsUnnumbered) {
+  std::unique_ptr<buffer::MeasurementBuffer> buffer =
+      MakeBuffer(/*marking=*/true, /*clearing=*/true, VoxelClass::kCliff);
+
+  buffer->BufferROSCloud(MakeSensorCloud({MakePoint(0.5, 0.0, 0.1)}));
+
+  const std::vector<observation::MeasurementReading> clearing_readings =
+      ClearingReadingsOf(*buffer);
+  ASSERT_EQ(clearing_readings.size(), 1u);
+  EXPECT_EQ(clearing_readings[0]._observation_sequence_number, 0u)
+      << "a clearing read must not spend a sequence number";
+  EXPECT_EQ(MarkingReadingsOf(*buffer)[0]._observation_sequence_number, 1u);
+}
+
+TEST_F(MeasurementBufferTest, AReadObservationKeepsItsNumberWhenReadAgain) {
+  std::unique_ptr<buffer::MeasurementBuffer> buffer =
+      MakeBuffer(/*marking=*/true, /*clearing=*/false, VoxelClass::kCliff,
+                 kSourceName, /*observation_keep_time=*/10.0);
+  // The keep time is measured from the wall clock, so stamps must be fresh.
+  const ros::Time now = ros::Time::now();
+
+  buffer->BufferROSCloud(MakeSensorCloud({MakePoint(0.5, 0.0, 0.1)}, now));
+  ASSERT_EQ(MarkingReadingsOf(*buffer).size(), 1u);
+  buffer->BufferROSCloud(MakeSensorCloud({MakePoint(0.6, 0.0, 0.1)}, now));
+
+  const std::vector<observation::MeasurementReading> readings =
+      MarkingReadingsOf(*buffer);
+  ASSERT_EQ(readings.size(), 2u)
+      << "both observations are inside the keep time";
+  EXPECT_EQ(readings[0]._observation_sequence_number, 2u)
+      << "the newest observation is listed first";
+  EXPECT_EQ(readings[1]._observation_sequence_number, 1u)
+      << "a second read must not renumber the older observation";
 }
 
 }  // namespace

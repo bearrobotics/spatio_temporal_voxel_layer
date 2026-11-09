@@ -32,6 +32,7 @@
 
 #include <boost/make_shared.hpp>
 #include <boost/shared_ptr.hpp>
+#include <cstdlib>
 #include <string>
 
 #include "gtest/gtest.h"
@@ -52,6 +53,17 @@ constexpr char kGenericOnlyLayer[] = "generic_only";
 constexpr char kCliffWithoutStoreAtZLayer[] = "cliff_without_store_at_z";
 constexpr char kNanStoreAtZLayer[] = "nan_store_at_z";
 constexpr char kStringStoreAtZLayer[] = "string_store_at_z";
+constexpr char kStaleConfirmationBlockLayer[] = "stale_confirmation_block";
+constexpr char kGatedSourceWithoutHitStreakLayer[] =
+    "gated_source_without_hit_streak";
+constexpr char kZeroMissesToBreakLayer[] = "zero_misses_to_break";
+constexpr char kClearingOnlyGatedSourceLayer[] = "clearing_only_gated_source";
+constexpr char kStringMissesToBreakLayer[] = "string_misses_to_break";
+constexpr char kHitStreakWithoutMissesToBreakLayer[] =
+    "hit_streak_without_misses_to_break";
+constexpr char kHitStreakOnUngatedSourceLayer[] =
+    "hit_streak_on_ungated_source";
+constexpr char kUnusedHitStreakWarning[] = "hit_streak is unused";
 // The layer advertises under <param namespace>/<layer name>.
 constexpr char kCliffVoxelTopic[] =
     "/stvl_layer_params_test/classified/cliff_voxel_grid";
@@ -160,6 +172,62 @@ TEST_F(LayerVoxelClassParamsTest, MistypedStoreAtZTerminatesAtStartup) {
 
   EXPECT_DEATH(InitializeLayer(kStringStoreAtZLayer),
                "store_at_z must be a number, got .*zero");
+}
+
+TEST_F(LayerVoxelClassParamsTest,
+       LeftoverConfirmationBlockTerminatesAtStartup) {
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+
+  EXPECT_DEATH(InitializeLayer(kStaleConfirmationBlockLayer),
+               "confirmation is no longer read");
+}
+
+TEST_F(LayerVoxelClassParamsTest,
+       GatedSourceWithoutHitStreakTerminatesAtStartup) {
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+
+  EXPECT_DEATH(InitializeLayer(kGatedSourceWithoutHitStreakLayer),
+               "misses_to_break is required");
+}
+
+TEST_F(LayerVoxelClassParamsTest, ZeroMissesToBreakTerminatesAtStartup) {
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+
+  EXPECT_DEATH(InitializeLayer(kZeroMissesToBreakLayer),
+               "misses_to_break must be >= 1");
+}
+
+TEST_F(LayerVoxelClassParamsTest, MistypedMissesToBreakTerminatesAtStartup) {
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+
+  EXPECT_DEATH(InitializeLayer(kStringMissesToBreakLayer),
+               "misses_to_break must be an int, got .*2");
+}
+
+TEST_F(LayerVoxelClassParamsTest,
+       HitStreakWithoutMissesToBreakTerminatesAtStartup) {
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+
+  EXPECT_DEATH(InitializeLayer(kHitStreakWithoutMissesToBreakLayer),
+               "hit_streak has no misses_to_break");
+}
+
+// Only marking readings reach the gate, so a clearing source needs no value.
+TEST_F(LayerVoxelClassParamsTest, ClearingOnlyGatedSourceInitializes) {
+  ExpectInitializedAndEmpty(InitializeLayer(kClearingOnlyGatedSourceLayer));
+}
+
+// The first test shuts the node down, which silences rosconsole for the rest
+// of the process, so the warning is read from a child process.
+TEST_F(LayerVoxelClassParamsTest, HitStreakOnAnUngatedSourceWarnsAtStartup) {
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+
+  EXPECT_EXIT(
+      {
+        InitializeLayer(kHitStreakOnUngatedSourceLayer);
+        std::_Exit(ros::ok() ? EXIT_SUCCESS : EXIT_FAILURE);
+      },
+      ::testing::ExitedWithCode(EXIT_SUCCESS), kUnusedHitStreakWarning);
 }
 
 TEST_F(LayerVoxelClassParamsTest, PublishingClassAdvertisesItsVoxelTopic) {

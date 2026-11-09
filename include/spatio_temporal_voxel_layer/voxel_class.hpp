@@ -76,10 +76,8 @@ struct VoxelClassPolicy {
   double decay_seconds = 0.0;
   int32_t priority = 0;  // higher wins on a conflicting mark; unique
 
-  // Separate observations needed to promote a voxel to this class.
-  int32_t confirmation_frames = 1;
-  // The longest gap between observations that keeps the count.
-  double confirmation_window_seconds = 0.0;
+  // Hits from one source a voxel needs before promotion to this class.
+  int32_t hits_to_promote = 1;
 
   bool cleared_by_frustums = true;
   bool cleared_by_dynamic_obstacles = true;

@@ -49,7 +49,7 @@
  *  - Sensor data filtering (noise filter, frustum-based filtering)
  *  - Safety zone frustum support
  *  - Per-voxel-class obstacle policies (per-class decay and clearing)
- *  - Multi-frame class confirmation (marked generic until promoted)
+ *  - Hit streak promotion gate (marked generic until promoted)
  *  - Per-class voxel point cloud topics
  *  - ClearClassVoxels service (removes every voxel of one class)
  *  - Voxel grid wipe on pose reset or map change
@@ -106,6 +106,47 @@ std::optional<double> LoadStoreAtZ(const ros::NodeHandle& class_nh) {
   return store_at_z;
 }
 
+// Raw read first: a non-integer must stop the layer, not count as unset.
+std::optional<int> LoadHitStreakThreshold(const ros::NodeHandle& nh,
+                                          const std::string& key,
+                                          int lowest_allowed) {
+  XmlRpc::XmlRpcValue raw;
+  if (!nh.getParam(key, raw)) {
+    return std::nullopt;
+  }
+  if (raw.getType() != XmlRpc::XmlRpcValue::TypeInt) {
+    ROS_FATAL_STREAM(nh.getNamespace()
+                     << "/" << key << " must be an int, got " << raw.toXml());
+    std::terminate();
+  }
+  const int threshold = static_cast<int>(raw);
+  if (threshold < lowest_allowed) {
+    ROS_FATAL_STREAM(nh.getNamespace()
+                     << "/" << key << " must be >= " << lowest_allowed
+                     << ", got " << threshold << ".");
+    std::terminate();
+  }
+  return threshold;
+}
+
+std::optional<observation::HitStreakPolicy> LoadHitStreakPolicy(
+    const ros::NodeHandle& source_nh) {
+  if (!source_nh.hasParam("hit_streak")) {
+    return std::nullopt;
+  }
+  const ros::NodeHandle hit_streak_nh(source_nh, "hit_streak");
+  const std::optional<int> misses_to_break = LoadHitStreakThreshold(
+      hit_streak_nh, "misses_to_break", /*lowest_allowed=*/1);
+  if (!misses_to_break) {
+    ROS_FATAL_STREAM(hit_streak_nh.getNamespace()
+                     << " has no misses_to_break.");
+    std::terminate();
+  }
+  observation::HitStreakPolicy hit_streak_policy;
+  hit_streak_policy.misses_to_break = *misses_to_break;
+  return hit_streak_policy;
+}
+
 void LoadVoxelClasses(ros::NodeHandle& nh, VoxelClassTable::Config& config) {
   using bear::lib::ros::LoadRequiredParam;
 
@@ -125,13 +166,18 @@ void LoadVoxelClasses(ros::NodeHandle& nh, VoxelClassTable::Config& config) {
         LoadRequiredParam<bool>(class_nh, "publish_class_voxels");
     policy.store_at_z = LoadStoreAtZ(class_nh);
 
+    // Ignoring a leftover confirmation block would turn the gate off.
     if (class_nh.hasParam("confirmation")) {
-      ros::NodeHandle confirmation_nh(class_nh, "confirmation");
-      policy.confirmation_frames =
-          LoadRequiredParam<int>(confirmation_nh, "frames");
-      policy.confirmation_window_seconds =
-          LoadRequiredParam<double>(confirmation_nh, "window");
+      ROS_FATAL_STREAM(class_nh.getNamespace()
+                       << "/confirmation is no longer read; set "
+                          "hits_to_promote on the class and "
+                          "hit_streak/misses_to_break on each marking source "
+                          "of the class instead.");
+      std::terminate();
     }
+    policy.hits_to_promote = LoadHitStreakThreshold(class_nh, "hits_to_promote",
+                                                    /*lowest_allowed=*/1)
+                                 .value_or(1);
 
     ros::NodeHandle cleared_nh(class_nh, "cleared_by");
     policy.cleared_by_frustums =
@@ -495,14 +541,38 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
       std::terminate();
     }
 
+    const int class_hits_to_promote =
+        class_table->GetPolicy(*voxel_class).hits_to_promote;
+    const std::optional<observation::HitStreakPolicy>
+        configured_hit_streak_policy = LoadHitStreakPolicy(source_node);
+    const observation::HitStreakPolicy hit_streak_policy =
+        configured_hit_streak_policy.value_or(observation::HitStreakPolicy{});
+    const bool is_hit_streak_gated = marking && class_hits_to_promote > 1;
+    if (is_hit_streak_gated && !configured_hit_streak_policy) {
+      ROS_FATAL_STREAM("Source '" << source
+                                  << "': hit_streak/misses_to_break is "
+                                     "required because class '"
+                                  << voxel_class_str << "' promotes after "
+                                  << class_hits_to_promote << " hits.");
+      std::terminate();
+    }
+    if (configured_hit_streak_policy && !is_hit_streak_gated) {
+      ROS_WARN_STREAM("Source '" << source
+                                 << "': hit_streak is unused unless the source "
+                                    "marks and the class's hits_to_promote "
+                                    "exceeds 1.");
+    }
+    const std::size_t source_index = _observation_buffers.size();
+
     // create an observation buffer
     _observation_buffers.push_back(boost::shared_ptr<buffer::MeasurementBuffer>(
         new buffer::MeasurementBuffer(
             topic, source, observation_keep_time, expected_update_rate,
             obstacle_range, tf_buffer_, _global_frame, sensor_frame,
             transform_tolerance, decay_acceleration, marking, clearing,
-            *voxel_class, _voxel_size, std::move(filter), enabled,
-            clear_after_reading, frustrum_factory)));
+            *voxel_class, source_index, hit_streak_policy, _voxel_size,
+            std::move(filter), enabled, clear_after_reading,
+            frustrum_factory)));
 
     // Add buffer to marking observation buffers
     if (marking == true) {
@@ -796,7 +866,7 @@ bool SpatioTemporalVoxelLayer::GetMarkingObservations(
 
   for (unsigned int i = 0; i != _marking_buffers.size(); ++i) {
     _marking_buffers[i]->Lock();
-    _marking_buffers[i]->GetReadings(marking_observations);
+    _marking_buffers[i]->GetMarkingReadings(marking_observations);
     current = _marking_buffers[i]->UpdatedAtExpectedRate();
     _marking_buffers[i]->Unlock();
   }

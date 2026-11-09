@@ -83,7 +83,8 @@ MeasurementBuffer::MeasurementBuffer(
     const std::string& global_frame, const std::string& sensor_frame,
     const double& tf_tolerance, const double& decay_acceleration,
     const bool& marking, const bool& clearing,
-    volume_grid::VoxelClass voxel_class, double voxel_size,
+    volume_grid::VoxelClass voxel_class, std::size_t source_index,
+    observation::HitStreakPolicy hit_streak_policy, double voxel_size,
     std::unique_ptr<spatio_temporal_voxel_layer::Filter> filter,
     const bool& enabled, const bool& clear_buffer_after_reading,
     FrustumFactoryFactory::FrustumFactory frustrum_factory)
@@ -103,6 +104,8 @@ MeasurementBuffer::MeasurementBuffer(
       _clearing(clearing),
       _voxel_size(voxel_size),
       _voxel_class(voxel_class),
+      _source_index(source_index),
+      _hit_streak_policy(hit_streak_policy),
       _filter(std::move(filter)),
       _enabled(enabled),
       _clear_buffer_after_reading(clear_buffer_after_reading),
@@ -154,6 +157,8 @@ void MeasurementBuffer::BufferROSCloud(const sensor_msgs::PointCloud2& cloud)
     _observation_list.front()._clearing = _clearing;
     _observation_list.front()._marking = _marking;
     _observation_list.front()._voxel_class = _voxel_class;
+    _observation_list.front()._source_index = _source_index;
+    _observation_list.front()._hit_streak_policy = _hit_streak_policy;
     _observation_list.front()._frustrum_factory = _frustrum_factory;
 
     if (_clearing && !_marking) {
@@ -202,6 +207,26 @@ void MeasurementBuffer::GetReadings(
        it != _observation_list.end(); ++it) {
     observations.push_back(*it);
   }
+}
+
+/*****************************************************************************/
+void MeasurementBuffer::GetMarkingReadings(
+    std::vector<observation::MeasurementReading>& observations)
+/*****************************************************************************/
+{
+  RemoveStaleObservations();
+
+  // Numbered on the first marking read, oldest first: unread is never a miss.
+  for (auto it = _observation_list.rbegin(); it != _observation_list.rend();
+       ++it) {
+    if (it->_observation_sequence_number == 0) {
+      it->_observation_sequence_number =
+          ++_last_assigned_observation_sequence_number;
+    }
+  }
+
+  observations.insert(observations.end(), _observation_list.begin(),
+                      _observation_list.end());
 }
 
 /*****************************************************************************/

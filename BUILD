@@ -393,10 +393,10 @@ cc_ros_test(
 )
 
 cc_ros_test(
-    name = "test_class_confirmation",
+    name = "test_hit_streak_gates",
     size = "small",
-    srcs = ["test/test_class_confirmation.cpp"],
-    launch_file = "test/test_class_confirmation.test",
+    srcs = ["test/test_hit_streak_gates.cpp"],
+    launch_file = "test/test_hit_streak_gates.test",
     deps = [
         ":spatio_temporal_voxel_layer_plugin",
         ":test_utils",

@@ -78,6 +78,8 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl_ros/transforms.h>
 // STL
+#include <cstddef>
+#include <cstdint>
 #include <list>
 #include <memory>
 #include <string>
@@ -107,19 +109,18 @@ typedef sensor_msgs::PointCloud2::Ptr point_cloud_ptr;
 // Measurement buffer
 class MeasurementBuffer {
  public:
-  MeasurementBuffer(const std::string& topic_name,
-                    const std::string& source_name,
-                    const double& observation_keep_time,
-                    const double& expected_update_rate,
-                    const double& obstacle_range, tf2_ros::Buffer& tf,
-                    const std::string& global_frame,
-                    const std::string& sensor_frame, const double& tf_tolerance,
-                    const double& decay_acceleration, const bool& marking,
-                    const bool& clearing, volume_grid::VoxelClass voxel_class,
-                    double voxel_size,
-                    std::unique_ptr<spatio_temporal_voxel_layer::Filter> filter,
-                    const bool& enabled, const bool& clear_buffer_after_reading,
-                    FrustumFactoryFactory::FrustumFactory frustrum_factory);
+  MeasurementBuffer(
+      const std::string& topic_name, const std::string& source_name,
+      const double& observation_keep_time, const double& expected_update_rate,
+      const double& obstacle_range, tf2_ros::Buffer& tf,
+      const std::string& global_frame, const std::string& sensor_frame,
+      const double& tf_tolerance, const double& decay_acceleration,
+      const bool& marking, const bool& clearing,
+      volume_grid::VoxelClass voxel_class, std::size_t source_index,
+      observation::HitStreakPolicy hit_streak_policy, double voxel_size,
+      std::unique_ptr<spatio_temporal_voxel_layer::Filter> filter,
+      const bool& enabled, const bool& clear_buffer_after_reading,
+      FrustumFactoryFactory::FrustumFactory frustrum_factory);
   std::string GetTopic() const;
   ~MeasurementBuffer(void);
 
@@ -128,6 +129,9 @@ class MeasurementBuffer {
 
   // Get measurements from the buffer
   void GetReadings(std::vector<observation::MeasurementReading>& observations);
+  // Numbers the unread observations before handing the readings over.
+  void GetMarkingReadings(
+      std::vector<observation::MeasurementReading>& observations);
 
   // enabler setter getter
   bool IsEnabled(void) const;
@@ -156,6 +160,10 @@ class MeasurementBuffer {
   double _obstacle_range, _tf_tolerance;
   double _decay_acceleration, _voxel_size;
   volume_grid::VoxelClass _voxel_class;
+  std::size_t _source_index;
+  observation::HitStreakPolicy _hit_streak_policy;
+  // Sequence number of the last observation the grid read for marking.
+  uint64_t _last_assigned_observation_sequence_number = 0;
   bool _marking, _clearing, _clear_buffer_after_reading, _enabled;
   std::unique_ptr<spatio_temporal_voxel_layer::Filter> _filter;
   FrustumFactoryFactory::FrustumFactory _frustrum_factory;

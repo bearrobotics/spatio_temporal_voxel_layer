@@ -1,0 +1,6 @@
+<launch>
+    <test test-name="test_hit_streak_gates" pkg="spatio_temporal_voxel_layer"
+          type="test_hit_streak_gates"
+          bazel="ROS/external/navigation/spatio_temporal_voxel_layer/test_hit_streak_gates_runner"
+          time-limit="60" />
+</launch>

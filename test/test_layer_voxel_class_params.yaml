@@ -25,15 +25,20 @@ cliff_class: &cliff_class
   decay: 120.0
   priority: 10
   publish_class_voxels: true
-  confirmation:
-    frames: 3
-    window: 1.0
+  hits_to_promote: 3
   cleared_by:
     frustums: true
     dynamic_obstacles: false
     footprint_clear: false
     front_blind_spot: false
     inter_sensor_decay: false
+
+cliff_source: &cliff_source
+  <<: *source_defaults
+  topic: /unused/cliff_points
+  voxel_class: cliff
+  hit_streak:
+    misses_to_break: 2
 
 layer_defaults: &layer_defaults
   observation_sources: "camera_source"
@@ -93,10 +98,75 @@ classified:
       <<: *cliff_class
       # Written as an int on purpose: yaml authors do, and roscpp promotes it to double.
       store_at_z: 0
+  cliff_source: *cliff_source
+
+stale_confirmation_block:
+  <<: *layer_defaults
+  observation_sources: "camera_source cliff_source"
+  voxel_classes:
+    cliff:
+      <<: *cliff_class
+      confirmation:
+        frames: 3
+  cliff_source: *cliff_source
+
+gated_source_without_hit_streak:
+  <<: *layer_defaults
+  observation_sources: "camera_source cliff_source"
+  voxel_classes:
+    cliff: *cliff_class
   cliff_source:
     <<: *source_defaults
     topic: /unused/cliff_points
     voxel_class: cliff
+
+clearing_only_gated_source:
+  <<: *layer_defaults
+  observation_sources: "camera_source cliff_source"
+  voxel_classes:
+    cliff: *cliff_class
+  cliff_source:
+    <<: *source_defaults
+    topic: /unused/cliff_points
+    voxel_class: cliff
+    marking: false
+
+string_misses_to_break:
+  <<: *layer_defaults
+  observation_sources: "camera_source cliff_source"
+  voxel_classes:
+    cliff: *cliff_class
+  cliff_source:
+    <<: *cliff_source
+    hit_streak:
+      misses_to_break: "2"
+
+hit_streak_without_misses_to_break:
+  <<: *layer_defaults
+  observation_sources: "camera_source cliff_source"
+  voxel_classes:
+    cliff: *cliff_class
+  cliff_source:
+    <<: *cliff_source
+    hit_streak:
+      misses_to_brea: 2
+
+zero_misses_to_break:
+  <<: *layer_defaults
+  observation_sources: "camera_source cliff_source"
+  voxel_classes:
+    cliff: *cliff_class
+  cliff_source:
+    <<: *cliff_source
+    hit_streak:
+      misses_to_break: 0
+
+hit_streak_on_ungated_source:
+  <<: *layer_defaults
+  camera_source:
+    <<: *source_defaults
+    hit_streak:
+      misses_to_break: 2
 
 cliff_without_store_at_z:
   <<: *layer_defaults

@@ -45,19 +45,10 @@ static_assert(kClassNames.size() == kVoxelClassCount,
 
 bool VoxelClassPolicy::IsValid() const {
   if (!std::isfinite(decay_seconds) || decay_seconds <= 0.0 || priority < 1 ||
-      confirmation_frames < 1) {
+      hits_to_promote < 1) {
     return false;
   }
-  if (store_at_z.has_value() && !std::isfinite(*store_at_z)) {
-    return false;
-  }
-  // A single confirmation frame is the same as no confirmation.
-  if (confirmation_frames == 1) {
-    return true;
-  }
-  // The window must be positive, and neither infinite nor NaN.
-  return std::isfinite(confirmation_window_seconds) &&
-         confirmation_window_seconds > 0.0;
+  return !store_at_z.has_value() || std::isfinite(*store_at_z);
 }
 
 VoxelClassTable VoxelClassTable::CreateGenericOnly(
@@ -99,14 +90,12 @@ std::optional<VoxelClassTable> VoxelClassTable::Create(const Config& config) {
       ROS_ERROR_STREAM(
           "voxel_classes: class '"
           << name << "' has priority " << row.policy.priority << ", decay "
-          << row.policy.decay_seconds << ", confirmation frames "
-          << row.policy.confirmation_frames << ", window "
-          << row.policy.confirmation_window_seconds << ", store_at_z "
+          << row.policy.decay_seconds << ", hits_to_promote "
+          << row.policy.hits_to_promote << ", store_at_z "
           << (row.policy.store_at_z ? std::to_string(*row.policy.store_at_z)
                                     : std::string("unset"))
           << ". Requires priority >= 1, a finite decay > 0, "
-             "frames >= 1, a finite window > 0 when frames "
-             "> 1, and a finite store_at_z when set.");
+             "hits_to_promote >= 1, and a finite store_at_z when set.");
       return std::nullopt;
     }
     if (!seen_priorities.insert(row.policy.priority).second) {

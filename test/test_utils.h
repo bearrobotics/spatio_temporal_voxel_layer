@@ -77,8 +77,8 @@ class TestableGrid : public SpatioTemporalVoxelGrid {
     accessor.setValueOn(coord, accessor.getValue(coord) - seconds);
   }
 
-  [[nodiscard]] std::size_t GetPendingPromotionCount() const {
-    return _promotion_candidates.size();
+  [[nodiscard]] std::size_t GetHitStreakCount() const {
+    return _hit_streaks.size();
   }
 
   [[nodiscard]] const visualization_msgs::MarkerArray& GetFrustumMarkers()

@@ -52,7 +52,7 @@
  *  - Safety zone frustum support
  *  - Per-voxel-class obstacle policies (per-class decay and clearing)
  *  - Frustums identified per observation source instead of sensor frame
- *  - Multi-frame class confirmation (marked generic until promoted)
+ *  - Hit streak promotion gate (marked generic until promoted)
  *  - Per-class voxel point cloud topics
  *  - ClearClassVoxels service (removes every voxel of one class)
  *  - Voxel grid wipe on pose reset or map change
@@ -89,6 +89,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <ctime>
 #include <iostream>
 #include <unordered_map>
@@ -298,10 +299,50 @@ class SpatioTemporalVoxelGrid {
                       openvdb::DoubleGrid::Accessor& value_accessor,
                       openvdb::Int32Grid::Accessor& class_accessor) const;
 
-  bool ConfirmPromotion(const openvdb::Coord& pt, const ros::Time& cloud_stamp,
-                        VoxelClass target_class,
-                        const VoxelClassPolicy& policy) const;
-  void ExpirePromotionCandidates(const ros::Time& current_cloud_stamp);
+  // Observations of one source that hit one voxel.
+  // A hit is a numbered observation with a point in the voxel.
+  // A miss is a numbered observation with no point in the voxel.
+  // An observation read again is neither a hit nor a miss.
+  struct VoxelHitStreak {
+    VoxelClass source_class = VoxelClass::kGeneric;
+    int32_t hits = 0;
+    uint64_t last_hit_observation_sequence_number = 0;
+    // Counts the observation once and returns the hits so far.
+    int32_t RecordHit(uint64_t observation_sequence_number,
+                      int32_t misses_to_break);
+    // A hit at observation_sequence_number would start a new streak.
+    bool IsBrokenBefore(uint64_t observation_sequence_number,
+                        int32_t misses_to_break) const;
+  };
+  // One voxel as seen by one source.
+  struct VoxelSourceKey {
+    openvdb::Coord coord;
+    std::size_t source_index = 0;
+    bool operator==(const VoxelSourceKey& other) const {
+      return coord == other.coord && source_index == other.source_index;
+    }
+  };
+  struct VoxelSourceKeyHash {
+    // Spreads the small source index over the hash bits.
+    static constexpr std::size_t kSourceIndexSpread = 0x9e3779b97f4a7c15ULL;
+    std::size_t operator()(const VoxelSourceKey& key) const {
+      return std::hash<openvdb::Coord>()(key.coord) ^
+             (key.source_index * kSourceIndexSpread);
+    }
+  };
+  // The newest observation of a source in a batch and the source's tolerance.
+  struct NewestSourceObservation {
+    uint64_t observation_sequence_number = 0;
+    int32_t misses_to_break = 1;
+  };
+
+  // Counts the observation in the source's streak on pt and returns the hits.
+  int32_t RecordVoxelHit(const openvdb::Coord& pt,
+                         const observation::MeasurementReading& obs) const;
+  void EraseHitStreak(const openvdb::Coord& pt, std::size_t source_index) const;
+  void EraseBrokenHitStreaks(
+      const std::unordered_map<std::size_t, NewestSourceObservation>&
+          newest_observation_by_source);
 
   // Check occupancy status of the grid
   bool IsGridEmpty(void) const;
@@ -337,13 +378,9 @@ class SpatioTemporalVoxelGrid {
   // Holds only non-generic voxels, so it is a subset of _grid.
   mutable openvdb::Int32Grid::Ptr _class_grid;
 
-  struct PromotionCandidate {
-    VoxelClass target_class = VoxelClass::kGeneric;
-    int32_t frame_count = 0;
-    ros::Time last_stamp = ros::TIME_MIN;
-  };
-  mutable std::unordered_map<openvdb::Coord, PromotionCandidate>
-      _promotion_candidates;
+  // Streaks that have not passed every gate yet.
+  mutable std::unordered_map<VoxelSourceKey, VoxelHitStreak, VoxelSourceKeyHash>
+      _hit_streaks;
 
   VoxelClassTable _class_table;
   int _decay_model;

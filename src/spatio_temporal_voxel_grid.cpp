@@ -50,7 +50,7 @@
  *  - Safety zone frustum support
  *  - Per-voxel-class obstacle policies (per-class decay and clearing)
  *  - Frustums identified per observation source instead of sensor frame
- *  - Multi-frame class confirmation (marked generic until promoted)
+ *  - Hit streak promotion gate (marked generic until promoted)
  *  - Per-class voxel point cloud topics
  *  - ClearClassVoxels service (removes every voxel of one class)
  *  - Voxel grid wipe on pose reset or map change
@@ -76,9 +76,12 @@
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <spatio_temporal_voxel_layer/spatio_temporal_voxel_grid.hpp>
+#include <unordered_map>
+#include <vector>
 
 namespace volume_grid {
 
@@ -93,6 +96,37 @@ constexpr std::array<std::array<float, 3>, 6> kSourceColors = {{
     {0.0f, 1.0f, 1.0f},
 }};
 constexpr float kSourceColorAlpha = 0.5f;
+
+// Keeps the batch's source order and puts each source's clouds oldest first.
+std::vector<const observation::MeasurementReading*>
+GetReadingsOldestFirstPerSource(
+    const std::vector<observation::MeasurementReading>& readings) {
+  std::unordered_map<std::size_t, std::size_t> source_rank_by_index;
+  for (const observation::MeasurementReading& reading : readings) {
+    source_rank_by_index.try_emplace(reading._source_index,
+                                     source_rank_by_index.size());
+  }
+  std::vector<const observation::MeasurementReading*> ordered_readings;
+  ordered_readings.reserve(readings.size());
+  for (const observation::MeasurementReading& reading : readings) {
+    ordered_readings.push_back(&reading);
+  }
+  std::stable_sort(
+      ordered_readings.begin(), ordered_readings.end(),
+      [&source_rank_by_index](const observation::MeasurementReading* lhs,
+                              const observation::MeasurementReading* rhs) {
+        const std::size_t lhs_rank =
+            source_rank_by_index.at(lhs->_source_index);
+        const std::size_t rhs_rank =
+            source_rank_by_index.at(rhs->_source_index);
+        if (lhs_rank != rhs_rank) {
+          return lhs_rank < rhs_rank;
+        }
+        return lhs->_observation_sequence_number <
+               rhs->_observation_sequence_number;
+      });
+  return ordered_readings;
+}
 
 }  // namespace
 
@@ -591,21 +625,27 @@ void SpatioTemporalVoxelGrid::Mark(
 {
   boost::unique_lock<boost::mutex> lock(_grid_lock);
 
-  ros::Time expiry_reference_stamp = ros::TIME_MIN;
+  std::unordered_map<std::size_t, NewestSourceObservation>
+      newest_observation_by_source;
 
-  // mark the grid
+  // Buffers list observations newest first; streaks count oldest first.
   // tbb::parallel_do(marking_readings, *this); /*must do via merged trees*/
-  for (const observation::MeasurementReading& reading : marking_readings) {
-    (*this)(reading);
+  for (const observation::MeasurementReading* reading :
+       GetReadingsOldestFirstPerSource(marking_readings)) {
+    (*this)(*reading);
 
-    if (reading._marking &&
-        _class_table.GetPolicy(reading._voxel_class).confirmation_frames > 1) {
-      expiry_reference_stamp = reading._cloud->header.stamp;
+    const bool is_promotion_gated =
+        _class_table.GetPolicy(reading->_voxel_class).hits_to_promote > 1;
+    if (reading->_marking && is_promotion_gated) {
+      // Readings of a source come oldest first, so the last is the newest.
+      newest_observation_by_source[reading->_source_index] = {
+          reading->_observation_sequence_number,
+          reading->_hit_streak_policy.misses_to_break};
     }
   }
 
-  if (expiry_reference_stamp != ros::TIME_MIN) {
-    ExpirePromotionCandidates(expiry_reference_stamp);
+  if (!newest_observation_by_source.empty()) {
+    EraseBrokenHitStreaks(newest_observation_by_source);
   }
   return;
 }
@@ -626,9 +666,16 @@ void SpatioTemporalVoxelGrid::operator()(
   const VoxelClass source_class = obs._voxel_class;
   const VoxelClassPolicy& source_policy = _class_table.GetPolicy(source_class);
   const int32_t source_priority = source_policy.priority;
-  const bool needs_confirmation = source_policy.confirmation_frames > 1;
+  const bool is_promotion_gated = source_policy.hits_to_promote > 1;
+  // Only the buffer numbers observations; unnumbered ones start no streak.
+  const bool is_observation_numbered = obs._observation_sequence_number != 0;
+  if (is_promotion_gated && !is_observation_numbered) {
+    ROS_ERROR_THROTTLE(5.0,
+                       "Source '%s' delivered an unnumbered observation; the "
+                       "observation counts toward no hit streak.",
+                       obs._source_name.c_str());
+  }
   const std::optional<double>& store_at_z = source_policy.store_at_z;
-  const ros::Time cloud_stamp = obs._cloud->header.stamp;
   // Only a generic source leaves the class grid empty for the whole cloud.
   const bool needs_class_check =
       source_class != VoxelClass::kGeneric || !_class_grid->empty();
@@ -674,12 +721,17 @@ void SpatioTemporalVoxelGrid::operator()(
     }
 
     VoxelClass mark_class = source_class;
-    if (needs_confirmation && source_priority > current_priority &&
-        !ConfirmPromotion(coord, cloud_stamp, source_class, source_policy)) {
-      if (current_class != VoxelClass::kGeneric) {
+    if (is_promotion_gated && source_priority > current_priority) {
+      const bool passes_promotion_gate =
+          is_observation_numbered &&
+          RecordVoxelHit(coord, obs) >= source_policy.hits_to_promote;
+      if (passes_promotion_gate) {
+        EraseHitStreak(coord, obs._source_index);
+      } else if (current_class != VoxelClass::kGeneric) {
         continue;
+      } else {
+        mark_class = VoxelClass::kGeneric;
       }
-      mark_class = VoxelClass::kGeneric;
     }
 
     if (!this->MarkClassifiedPoint(coord, cur_time, mark_class, value_accessor,
@@ -781,7 +833,7 @@ bool SpatioTemporalVoxelGrid::ResetGrid(void)
   try {
     _grid->clear();
     _class_grid->clear();
-    _promotion_candidates.clear();
+    _hit_streaks.clear();
     if (this->IsGridEmpty()) {
       return true;
     }
@@ -799,7 +851,7 @@ void SpatioTemporalVoxelGrid::ResetGridArea(const occupany_cell& start,
 {
   boost::unique_lock<boost::mutex> lock(_grid_lock);
 
-  _promotion_candidates.clear();
+  _hit_streaks.clear();
 
   openvdb::DoubleGrid::Accessor value_accessor = _grid->getAccessor();
   openvdb::Int32Grid::Accessor class_accessor = _class_grid->getAccessor();
@@ -846,10 +898,9 @@ std::size_t SpatioTemporalVoxelGrid::ClearClassVoxels(VoxelClass cls)
     }
   }
 
-  for (auto it = _promotion_candidates.begin();
-       it != _promotion_candidates.end();) {
-    if (it->second.target_class == cls) {
-      it = _promotion_candidates.erase(it);
+  for (auto it = _hit_streaks.begin(); it != _hit_streaks.end();) {
+    if (it->second.source_class == cls) {
+      it = _hit_streaks.erase(it);
     } else {
       ++it;
     }
@@ -887,55 +938,78 @@ bool SpatioTemporalVoxelGrid::MarkClassifiedPoint(
 }
 
 /*****************************************************************************/
-bool SpatioTemporalVoxelGrid::ConfirmPromotion(
-    const openvdb::Coord& pt, const ros::Time& cloud_stamp,
-    VoxelClass target_class, const VoxelClassPolicy& policy) const
+int32_t SpatioTemporalVoxelGrid::RecordVoxelHit(
+    const openvdb::Coord& pt, const observation::MeasurementReading& obs) const
 /*****************************************************************************/
 {
-  PromotionCandidate& candidate = _promotion_candidates[pt];
-
-  const double gap_seconds =
-      std::abs((cloud_stamp - candidate.last_stamp).toSec());
-  const bool class_changed = candidate.target_class != target_class;
-  const bool gap_too_wide = gap_seconds > policy.confirmation_window_seconds;
-  if (class_changed || gap_too_wide) {
-    candidate.target_class = target_class;
-    candidate.frame_count = 0;
-  }
-
-  // The count rises once per observation.
-  if (cloud_stamp != candidate.last_stamp) {
-    ++candidate.frame_count;
-    candidate.last_stamp = cloud_stamp;
-  }
-
-  if (candidate.frame_count < policy.confirmation_frames) {
-    return false;
-  }
-  _promotion_candidates.erase(pt);
-  return true;
+  VoxelHitStreak& streak =
+      _hit_streaks
+          .try_emplace(VoxelSourceKey{pt, obs._source_index},
+                       VoxelHitStreak{obs._voxel_class})
+          .first->second;
+  return streak.RecordHit(obs._observation_sequence_number,
+                          obs._hit_streak_policy.misses_to_break);
 }
 
 /*****************************************************************************/
-void SpatioTemporalVoxelGrid::ExpirePromotionCandidates(
-    const ros::Time& current_cloud_stamp)
+void SpatioTemporalVoxelGrid::EraseHitStreak(const openvdb::Coord& pt,
+                                             std::size_t source_index) const
 /*****************************************************************************/
 {
-  // The margin is loose on purpose: expiry only bounds memory.
-  constexpr double kMaxAgeWindowMultiplier = 2.0;
-  constexpr double kMaxAgeSlackSeconds = 1.0;
+  _hit_streaks.erase(VoxelSourceKey{pt, source_index});
+}
 
-  for (auto it = _promotion_candidates.begin();
-       it != _promotion_candidates.end();) {
-    const double max_age_seconds =
-        kMaxAgeWindowMultiplier *
-            _class_table.GetPolicy(it->second.target_class)
-                .confirmation_window_seconds +
-        kMaxAgeSlackSeconds;
-    const double age_seconds =
-        (current_cloud_stamp - it->second.last_stamp).toSec();
-    if (age_seconds > max_age_seconds) {
-      it = _promotion_candidates.erase(it);
+/*****************************************************************************/
+int32_t SpatioTemporalVoxelGrid::VoxelHitStreak::RecordHit(
+    uint64_t observation_sequence_number, int32_t misses_to_break)
+/*****************************************************************************/
+{
+  // Observations at or below the last hit were counted already.
+  if (hits > 0 &&
+      observation_sequence_number <= last_hit_observation_sequence_number) {
+    return hits;
+  }
+  const bool streak_continues =
+      hits > 0 && !IsBrokenBefore(observation_sequence_number, misses_to_break);
+  hits = streak_continues ? hits + 1 : 1;
+  last_hit_observation_sequence_number = observation_sequence_number;
+  return hits;
+}
+
+/*****************************************************************************/
+bool SpatioTemporalVoxelGrid::VoxelHitStreak::IsBrokenBefore(
+    uint64_t observation_sequence_number, int32_t misses_to_break) const
+/*****************************************************************************/
+{
+  if (observation_sequence_number <= last_hit_observation_sequence_number) {
+    return false;
+  }
+  // Every observation between the last hit and this hit is a miss.
+  const uint64_t consecutive_misses =
+      observation_sequence_number - last_hit_observation_sequence_number - 1;
+  return consecutive_misses >= static_cast<uint64_t>(misses_to_break);
+}
+
+/*****************************************************************************/
+void SpatioTemporalVoxelGrid::EraseBrokenHitStreaks(
+    const std::unordered_map<std::size_t, NewestSourceObservation>&
+        newest_observation_by_source)
+/*****************************************************************************/
+{
+  // A streak the next hit would not continue holds nothing worth keeping.
+  for (auto it = _hit_streaks.begin(); it != _hit_streaks.end();) {
+    const auto newest_observation =
+        newest_observation_by_source.find(it->first.source_index);
+    if (newest_observation == newest_observation_by_source.end()) {
+      ++it;
+      continue;
+    }
+    // The earliest next hit is the observation after the batch's newest.
+    const uint64_t next_observation_sequence_number =
+        newest_observation->second.observation_sequence_number + 1;
+    if (it->second.IsBrokenBefore(next_observation_sequence_number,
+                                  newest_observation->second.misses_to_break)) {
+      it = _hit_streaks.erase(it);
     } else {
       ++it;
     }

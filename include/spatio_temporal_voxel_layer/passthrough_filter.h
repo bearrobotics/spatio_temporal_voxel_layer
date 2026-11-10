@@ -20,7 +20,7 @@
  *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
  *  MA 02110-1301 USA
  *
- * Author: Hoon (Seung-Hun) Han (seunghun.han@bearrobotics.ai)
+ * Author: Seung-Hun (Hoon) Han (seunghun.han@bearrobotics.ai)
  *********************************************************************/
 
 #ifndef SPATIO_TEMPORAL_VOXEL_LAYER_PASSTHROUGH_FILTER_H_

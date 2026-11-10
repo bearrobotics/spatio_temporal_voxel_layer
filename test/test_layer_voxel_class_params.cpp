@@ -79,6 +79,8 @@ constexpr char kUnusedHitStreakWarning[] = "hit_streak is unused";
 // The layer advertises under <param namespace>/<layer name>.
 constexpr char kCliffVoxelTopic[] =
     "/stvl_layer_params_test/classified/cliff_voxel_grid";
+constexpr char kVehicleVoxelTopic[] =
+    "/stvl_layer_params_test/classified/vehicle_voxel_grid";
 constexpr char kHitStreakResetLayer[] = "hit_streak_reset";
 constexpr char kGatedSourceTopic[] =
     "/stvl_layer_params_test/hit_streak_reset_frames";
@@ -456,6 +458,40 @@ TEST_F(LayerVoxelClassParamsTest, ClearClassVoxelsSucceedsOnceInitialized) {
   EXPECT_TRUE(resp.success);
   EXPECT_EQ(resp.cleared_voxels, 0u);
   EXPECT_TRUE(resp.message.empty());
+}
+
+TEST_F(LayerVoxelClassParamsTest, VehicleClassAdvertisesItsVoxelTopic) {
+  InitializeLayer(kClassifiedLayer);
+  ASSERT_TRUE(ros::ok());
+
+  EXPECT_TRUE(IsAdvertised(kVehicleVoxelTopic, "sensor_msgs/PointCloud2"));
+}
+
+TEST_F(LayerVoxelClassParamsTest, ClearVehicleVoxelsSucceedsOnceInitialized) {
+  boost::shared_ptr<SpatioTemporalVoxelLayer> layer =
+      InitializeLayer(kClassifiedLayer);
+  ASSERT_TRUE(ros::ok());
+
+  const bear_msgs::ClearClassVoxels::Response resp =
+      ClearClassVoxels(*layer, "vehicle");
+
+  EXPECT_TRUE(resp.success);
+  EXPECT_EQ(resp.cleared_voxels, 0u);
+  EXPECT_TRUE(resp.message.empty());
+}
+
+TEST_F(LayerVoxelClassParamsTest, ClearClassVoxelsRejectsAnUnconfiguredClass) {
+  boost::shared_ptr<SpatioTemporalVoxelLayer> layer =
+      InitializeLayer(kGenericOnlyLayer);
+  ASSERT_TRUE(ros::ok());
+
+  const bear_msgs::ClearClassVoxels::Response resp =
+      ClearClassVoxels(*layer, "cliff");
+
+  EXPECT_FALSE(resp.success);
+  EXPECT_EQ(resp.cleared_voxels, 0u);
+  EXPECT_NE(resp.message.find("'cliff' is not configured"), std::string::npos)
+      << "the rejection must name the class and say why, got: " << resp.message;
 }
 
 TEST_F(LayerVoxelClassParamsTest, MapChangeResetRedrawsTheWholeLayer) {

@@ -47,6 +47,7 @@
 namespace {
 
 namespace test_utils = spatio_temporal_voxel_layer::test_utils;
+using test_utils::MakeCliffAndVehicleTable;
 using test_utils::TestableGrid;
 using volume_grid::SpatioTemporalVoxelGrid;
 using volume_grid::VoxelClass;
@@ -290,7 +291,8 @@ TEST(VoxelClassTableTest, IsConfiguredTracksConfiguredClasses) {
 TEST(VoxelClassTableTest, ParseVoxelClassMapsKnownNames) {
   EXPECT_EQ(volume_grid::ParseVoxelClass("generic"), VoxelClass::kGeneric);
   EXPECT_EQ(volume_grid::ParseVoxelClass("cliff"), VoxelClass::kCliff);
-  EXPECT_FALSE(volume_grid::ParseVoxelClass("vehicle").has_value());
+  EXPECT_EQ(volume_grid::ParseVoxelClass("vehicle"), VoxelClass::kVehicle);
+  EXPECT_FALSE(volume_grid::ParseVoxelClass("not_a_class").has_value());
 }
 
 TEST(VoxelClassTableTest, OutOfRangeClassIdReadsAsGeneric) {
@@ -363,6 +365,34 @@ TEST(VoxelClassGridTest, CliffMarkPromotesGenericVoxel) {
       MakeGrid(MakeCliffTable(kDecayNever, kDecayNever), volume_grid::LINEAR);
   grid->Mark({MakeMarkingReading({mark}, VoxelClass::kGeneric)});
   ASSERT_EQ(grid->GetClassAt(mark), VoxelClass::kGeneric);
+
+  grid->Mark({MakeMarkingReading({mark}, VoxelClass::kCliff)});
+
+  EXPECT_EQ(grid->GetClassAt(mark), VoxelClass::kCliff);
+  EXPECT_TRUE(grid->IsClassGridConsistent());
+}
+
+// Generic never writes the class grid, so only vehicle can test priority.
+TEST(VoxelClassGridTest, VehicleRemarkDoesNotDowngradeCliff) {
+  const geometry_msgs::Point mark = MakePoint(0.0, 0.0, 0.1);
+  auto grid = MakeGrid(
+      MakeCliffAndVehicleTable(kDecayNever, /*cliff_hits_to_promote=*/1),
+      volume_grid::LINEAR);
+  grid->Mark({MakeMarkingReading({mark}, VoxelClass::kCliff)});
+
+  grid->Mark({MakeMarkingReading({mark}, VoxelClass::kVehicle)});
+
+  EXPECT_EQ(grid->GetClassAt(mark), VoxelClass::kCliff);
+  EXPECT_TRUE(grid->IsClassGridConsistent());
+}
+
+TEST(VoxelClassGridTest, CliffMarkPromotesVehicleVoxel) {
+  const geometry_msgs::Point mark = MakePoint(0.0, 0.0, 0.1);
+  auto grid = MakeGrid(
+      MakeCliffAndVehicleTable(kDecayNever, /*cliff_hits_to_promote=*/1),
+      volume_grid::LINEAR);
+  grid->Mark({MakeMarkingReading({mark}, VoxelClass::kVehicle)});
+  ASSERT_EQ(grid->GetClassAt(mark), VoxelClass::kVehicle);
 
   grid->Mark({MakeMarkingReading({mark}, VoxelClass::kCliff)});
 

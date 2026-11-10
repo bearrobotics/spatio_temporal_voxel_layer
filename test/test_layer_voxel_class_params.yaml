@@ -89,7 +89,7 @@ layer_defaults: &layer_defaults
 
 classified:
   <<: *layer_defaults
-  observation_sources: "camera_source cliff_source"
+  observation_sources: "camera_source cliff_source vehicle_source"
   publish_voxel_map: true
   clear_grid_on_map_change: true
   clear_grid_on_pose_reset: true
@@ -98,7 +98,21 @@ classified:
       <<: *cliff_class
       # Written as an int on purpose: yaml authors do, and roscpp promotes it to double.
       store_at_z: 0
+    vehicle:
+      decay: 30.0
+      priority: 5
+      publish_class_voxels: true
+      cleared_by:
+        frustums: true
+        dynamic_obstacles: false
+        footprint_clear: true
+        front_blind_spot: false
+        inter_sensor_decay: false
   cliff_source: *cliff_source
+  vehicle_source:
+    <<: *source_defaults
+    topic: /unused/vehicle_points
+    voxel_class: vehicle
 
 stale_confirmation_block:
   <<: *layer_defaults

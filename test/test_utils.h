@@ -21,6 +21,7 @@
  *  MA 02110-1301 USA
  *
  * Author: Vincent Benenati (vincent.benenati@bearrobotics.ai)
+ *         Seung-Hun (Hoon) Han (seunghun.han@bearrobotics.ai)
  *********************************************************************/
 
 #ifndef SPATIO_TEMPORAL_VOXEL_LAYER_TEST_UTILS_H_
@@ -40,6 +41,7 @@
 #include "spatio_temporal_voxel_layer/frustum_models/inter_sensor_decay_prism.hpp"
 #include "spatio_temporal_voxel_layer/robot_motion_tracker.hpp"
 #include "spatio_temporal_voxel_layer/spatio_temporal_voxel_grid.hpp"
+#include "spatio_temporal_voxel_layer/voxel_class.hpp"
 namespace spatio_temporal_voxel_layer::test_utils {
 using geometry::FootprintClearingPrism;
 using geometry::FootprintFrustum;
@@ -114,6 +116,10 @@ std::unique_ptr<SpatioTemporalVoxelGrid> MakeTestGrid(
 // Test data helpers
 sensor_msgs::PointCloud2 MakePointCloud(
     const std::vector<geometry_msgs::Point>& points);
+
+// decay_seconds sets generic, cliff and vehicle; cliff ranks above vehicle.
+volume_grid::VoxelClassTable MakeCliffAndVehicleTable(
+    double decay_seconds, int cliff_hits_to_promote);
 
 // Test constants
 constexpr float kVoxelSize = 0.05f;

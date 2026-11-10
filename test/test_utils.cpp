@@ -21,6 +21,7 @@
  *  MA 02110-1301 USA
  *
  * Author: Vincent Benenati (vincent.benenati@bearrobotics.ai)
+ *         Seung-Hun (Hoon) Han (seunghun.han@bearrobotics.ai)
  *********************************************************************/
 
 #include "test/test_utils.h"
@@ -29,11 +30,15 @@
 #include <ros/ros.h>
 #include <sensor_msgs/point_cloud2_iterator.h>
 
+#include <cstdint>
+#include <optional>
+
 #include "spatio_temporal_voxel_layer/dynamic_obstacle_tracker.hpp"
 #include "spatio_temporal_voxel_layer/frustum_models/footprint_clearing_prism.hpp"
 #include "spatio_temporal_voxel_layer/frustum_models/footprint_frustum.hpp"
 #include "spatio_temporal_voxel_layer/robot_motion_tracker.hpp"
 #include "spatio_temporal_voxel_layer/spatio_temporal_voxel_grid.hpp"
+#include "spatio_temporal_voxel_layer/voxel_class.hpp"
 
 namespace spatio_temporal_voxel_layer {
 namespace test_utils {
@@ -121,6 +126,25 @@ sensor_msgs::PointCloud2 MakePointCloud(
     ++iter_z;
   }
   return cloud;
+}
+
+volume_grid::VoxelClassTable MakeCliffAndVehicleTable(
+    double decay_seconds, int cliff_hits_to_promote) {
+  constexpr int32_t kCliffPriority = 10;
+  constexpr int32_t kVehiclePriority = 5;
+  volume_grid::VoxelClassTable::Config config;
+  config.generic_decay_seconds = decay_seconds;
+  volume_grid::VoxelClassTable::Row cliff_row;
+  cliff_row.voxel_class = VoxelClass::kCliff;
+  cliff_row.policy.decay_seconds = decay_seconds;
+  cliff_row.policy.priority = kCliffPriority;
+  cliff_row.policy.hits_to_promote = cliff_hits_to_promote;
+  volume_grid::VoxelClassTable::Row vehicle_row;
+  vehicle_row.voxel_class = VoxelClass::kVehicle;
+  vehicle_row.policy.decay_seconds = decay_seconds;
+  vehicle_row.policy.priority = kVehiclePriority;
+  config.rows = {cliff_row, vehicle_row};
+  return volume_grid::VoxelClassTable::Create(config).value();
 }
 
 }  // namespace test_utils

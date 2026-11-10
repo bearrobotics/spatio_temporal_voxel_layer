@@ -1375,6 +1375,12 @@ bool SpatioTemporalVoxelLayer::ClearClassVoxelsCallback(
     ROS_WARN_STREAM("clear_class_voxels rejected. " << resp.message);
     return true;
   }
+  if (!_voxel_grid->IsClassConfigured(*voxel_class)) {
+    resp.message = "Voxel class '" + req.class_name +
+                   "' is not configured under voxel_classes.";
+    ROS_WARN_STREAM("clear_class_voxels rejected. " << resp.message);
+    return true;
+  }
 
   boost::recursive_mutex::scoped_lock lock(_voxel_grid_lock);
   resp.cleared_voxels =

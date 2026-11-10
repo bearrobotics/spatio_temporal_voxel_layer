@@ -243,6 +243,11 @@ class SpatioTemporalVoxelGrid {
   // Returns how many voxels were removed; kGeneric removes none.
   std::size_t ClearClassVoxels(VoxelClass cls);
 
+  // Generic is always configured; any other class needs a voxel_classes entry.
+  [[nodiscard]] bool IsClassConfigured(VoxelClass cls) const {
+    return _class_table.IsConfigured(cls);
+  }
+
   // Save the file to file with size information
   bool SaveGrid(const std::string& file_name, double& map_size_bytes);
 
@@ -386,7 +391,7 @@ class SpatioTemporalVoxelGrid {
   mutable std::unordered_map<VoxelSourceKey, VoxelHitStreak, VoxelSourceKeyHash>
       _hit_streaks;
 
-  VoxelClassTable _class_table;
+  const VoxelClassTable _class_table;
   int _decay_model;
   double _background_value, _voxel_size;
   bool _pub_voxels;

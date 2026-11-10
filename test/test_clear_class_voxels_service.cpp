@@ -32,9 +32,9 @@
 
 namespace {
 
-// Only the rejection paths run here: they return before the callback touches
-// the voxel grid, so an uninitialized layer is enough. Clearing a class is
-// covered at the grid level by test_class_publish_and_clear.
+// The rejections that return before the callback reads the voxel grid run
+// here on an uninitialized layer. test_layer_voxel_class_params covers the
+// unconfigured class rejection; test_class_publish_and_clear covers clearing.
 bear_msgs::ClearClassVoxels::Response CallClearClassVoxels(
     const std::string& class_name) {
   spatio_temporal_voxel_layer::SpatioTemporalVoxelLayer layer;

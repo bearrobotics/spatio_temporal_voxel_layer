@@ -37,7 +37,7 @@ namespace {
 
 // Indexed by VoxelClass value; the static_assert catches a class added
 // without a name.
-constexpr std::array kClassNames = {"generic", "cliff"};
+constexpr std::array kClassNames = {"generic", "cliff", "vehicle"};
 static_assert(kClassNames.size() == kVoxelClassCount,
               "every VoxelClass needs a name");
 

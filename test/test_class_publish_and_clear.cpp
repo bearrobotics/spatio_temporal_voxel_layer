@@ -47,6 +47,7 @@
 namespace {
 
 namespace test_utils = spatio_temporal_voxel_layer::test_utils;
+using test_utils::MakeCliffAndVehicleTable;
 using test_utils::TestableGrid;
 using volume_grid::VoxelClass;
 using volume_grid::VoxelClassTable;
@@ -75,7 +76,7 @@ observation::MeasurementReading MakeReading(
   reading._clearing = false;
   reading._obstacle_range_in_m = 100.0;
   reading._voxel_class = voxel_class;
-  // No voxel is marked twice here, so one cloud number serves every reading.
+  // No voxel takes two gated marks, so one cloud number serves every reading.
   reading._observation_sequence_number = 1;
   return reading;
 }
@@ -168,6 +169,7 @@ std::size_t GetFlattenedCostmapCellCount(TestableGrid* grid) {
 
 geometry_msgs::Point CliffVoxelPoint() { return MakePoint(0.0, 0.0, 0.1); }
 geometry_msgs::Point GenericVoxelPoint() { return MakePoint(1.0, 1.0, 0.1); }
+geometry_msgs::Point VehicleVoxelPoint() { return MakePoint(0.5, 0.5, 0.1); }
 
 std::unique_ptr<TestableGrid> MakeGridWithMarkedCliff() {
   auto grid = MakeGrid(MakePublishingCliffTable());
@@ -331,6 +333,31 @@ TEST(ClassClearTest, ClearClassVoxelsErasesTheClassHitStreaks) {
 
   EXPECT_EQ(grid->GetHitStreakCount(), 0u)
       << "a cleared voxel must not return from a streak left behind";
+}
+
+TEST(ClassClearTest, ClearClassVoxelsKeepsOtherClasses) {
+  auto grid = MakeGrid(
+      MakeCliffAndVehicleTable(kLongDecaySeconds, /*cliff_hits_to_promote=*/1));
+  grid->Mark({MakeReading({CliffVoxelPoint()}, VoxelClass::kCliff),
+              MakeReading({VehicleVoxelPoint()}, VoxelClass::kVehicle)});
+
+  EXPECT_EQ(grid->ClearClassVoxels(VoxelClass::kVehicle), 1u);
+  EXPECT_FALSE(HasVoxelNear(grid.get(), VehicleVoxelPoint()));
+  EXPECT_EQ(grid->GetClassAt(CliffVoxelPoint()), VoxelClass::kCliff);
+  EXPECT_TRUE(grid->IsClassGridConsistent());
+}
+
+TEST(ClassClearTest, ClearClassVoxelsKeepsOtherClassesHitStreaks) {
+  auto grid = MakeGrid(
+      MakeCliffAndVehicleTable(kLongDecaySeconds, /*cliff_hits_to_promote=*/3));
+  grid->Mark({MakeReading({VehicleVoxelPoint()}, VoxelClass::kVehicle)});
+  grid->Mark({MakeReading({VehicleVoxelPoint()}, VoxelClass::kCliff)});
+  ASSERT_EQ(grid->GetClassAt(VehicleVoxelPoint()), VoxelClass::kVehicle);
+  ASSERT_EQ(grid->GetHitStreakCount(), 1u);
+
+  EXPECT_EQ(grid->ClearClassVoxels(VoxelClass::kVehicle), 1u);
+  EXPECT_EQ(grid->GetHitStreakCount(), 1u)
+      << "clearing a vehicle voxel must keep the cliff streak building on it";
 }
 
 TEST(ClassClearTest, FlattenedCostmapDropsAClearedVoxel) {

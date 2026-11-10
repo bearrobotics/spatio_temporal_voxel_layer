@@ -46,6 +46,7 @@ namespace volume_grid {
 enum class VoxelClass : int32_t {
   kGeneric = 0,
   kCliff = 1,
+  kVehicle = 2,
   kCount,
 };
 

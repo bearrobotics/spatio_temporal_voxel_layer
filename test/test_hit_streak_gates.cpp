@@ -46,6 +46,7 @@
 namespace {
 
 namespace test_utils = spatio_temporal_voxel_layer::test_utils;
+using test_utils::MakeCliffAndVehicleTable;
 using test_utils::TestableGrid;
 using volume_grid::SpatioTemporalVoxelGrid;
 using volume_grid::VoxelClass;
@@ -171,6 +172,12 @@ void MarkCliffObservationAt(TestableGrid* grid,
   reading._cloud->header.stamp =
       kObservationStamp + ros::Duration(seconds_after_first);
   grid->Mark({reading});
+}
+
+void MarkVehicleObservation(TestableGrid* grid) {
+  grid->Mark(
+      {MakeReading({CliffVoxelPoint()}, VoxelClass::kVehicle,
+                   /*observation_sequence_number=*/1, kOtherSourceIndex)});
 }
 
 observation::MeasurementReading MakeCreationGatedReading(
@@ -470,6 +477,33 @@ TEST(PromotionGateTest, PromotedCliffSurvivesGenericDecayPass) {
 
   EXPECT_TRUE(HasVoxelNear(grid.get(), 0.0, 0.0))
       << "a promoted cliff must live on the cliff timer, not the generic one";
+}
+
+// Refreshing on unpromoted cliff hits would keep a stale vehicle mark alive.
+TEST(PromotionGateTest, UnpromotedCliffLeavesAVehicleMarkUntouched) {
+  auto grid = MakeGrid(MakeCliffAndVehicleTable(kDecayNever, kHitsToPromote));
+  MarkVehicleObservation(grid.get());
+  grid->AgeMark(CliffVoxelPoint(), kMarkAgeBeyondDecay);
+
+  MarkCliffObservations(grid.get(), kHitsToPromote - 1);
+
+  EXPECT_EQ(grid->GetClassAt(CliffVoxelPoint()), VoxelClass::kVehicle);
+  RunDecayPass(grid.get());
+  EXPECT_FALSE(HasVoxelNear(grid.get(), 0.0, 0.0))
+      << "an unpromoted cliff must not refresh the vehicle mark";
+  EXPECT_TRUE(grid->IsClassGridConsistent());
+}
+
+TEST(PromotionGateTest, CliffStreakOnAVehicleVoxelPromotes) {
+  auto grid = MakeGrid(MakeCliffAndVehicleTable(kDecayNever, kHitsToPromote));
+  MarkVehicleObservation(grid.get());
+
+  MarkCliffObservations(grid.get(), kHitsToPromote);
+
+  EXPECT_EQ(grid->GetClassAt(CliffVoxelPoint()), VoxelClass::kCliff);
+  EXPECT_EQ(grid->GetHitStreakCount(), 0u)
+      << "a promoted voxel must stop holding a streak";
+  EXPECT_TRUE(grid->IsClassGridConsistent());
 }
 
 // Erasure judges each source by its own newest observation in the batch.

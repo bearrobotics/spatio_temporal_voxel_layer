@@ -65,7 +65,8 @@
  */
 
 // PCL
-#include <pcl_ros/transforms.h>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
 // OpenVDB
 #include <openvdb/openvdb.h>
 // STL

@@ -76,7 +76,6 @@
 #include <spatio_temporal_voxel_layer/voxel_class.hpp>
 // PCL
 #include <pcl_conversions/pcl_conversions.h>
-#include <pcl_ros/transforms.h>
 // STL
 #include <cstddef>
 #include <cstdint>

@@ -80,9 +80,6 @@
 #ifndef VOLUME_GRID_H_
 #define VOLUME_GRID_H_
 
-// PCL
-#include <pcl/PCLPointCloud2.h>
-#include <pcl_ros/transforms.h>
 // ROS
 #include <ros/ros.h>
 // STL
@@ -99,13 +96,13 @@
 #include <vector>
 // msgs
 #include <geometry_msgs/Point.h>
+#include <geometry_msgs/Point32.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <sensor_msgs/point_cloud2_iterator.h>
 #include <visualization_msgs/Marker.h>
 // OpenVDB
+#include <openvdb/math/Ray.h>
 #include <openvdb/openvdb.h>
-#include <openvdb/tools/GridTransformer.h>
-#include <openvdb/tools/RayIntersector.h>
 // measurement struct and buffer
 #include <spatio_temporal_voxel_layer/dynamic_obstacle_tracker.hpp>
 #include <spatio_temporal_voxel_layer/frustum_models/depth_camera_frustum.hpp>

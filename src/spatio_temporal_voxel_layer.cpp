@@ -83,6 +83,7 @@
 #include "bearlib/ros/param_loader.h"
 #include "spatio_temporal_voxel_layer/filter_factory.h"
 #include "spatio_temporal_voxel_layer/robot_motion_tracker.hpp"
+#include "tf/transform_listener.h"
 
 namespace spatio_temporal_voxel_layer {
 

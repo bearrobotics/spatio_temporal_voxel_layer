@@ -66,6 +66,7 @@
  * GNU Lesser General Public License for more details.
  */
 
+#include <tf/exceptions.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <tf2_sensor_msgs/tf2_sensor_msgs.h>
 

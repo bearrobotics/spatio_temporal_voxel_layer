@@ -511,3 +511,19 @@ cc_ros_test(
         "@openvdb",
     ],
 )
+
+cc_ros_test(
+    name = "bench_voxel_size",
+    size = "medium",
+    srcs = ["test/bench_voxel_size.cpp"],
+    launch_file = "test/bench_voxel_size.test",
+    tags = ["manual"],
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        ":test_utils",
+        "//third_party/ros:roscpp",
+        "@gtests//:gtest",
+        "@openvdb",
+        "@ros_geometry2//:tf2_geometry_msgs",
+    ],
+)

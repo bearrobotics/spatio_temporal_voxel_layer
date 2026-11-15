@@ -1,0 +1,14 @@
+<launch>
+    <test test-name="bench_voxel_size" pkg="spatio_temporal_voxel_layer"
+        type="bench_voxel_size" time-limit="600"
+        bazel="ROS/external/navigation/spatio_temporal_voxel_layer/bench_voxel_size_runner">
+        <rosparam command="load" ns="/bench">
+            frustum:
+                type: 3d_camera
+                vertical_fov_angle: 1.08
+                horizontal_fov_angle: 1.51
+                min_z: 0.35
+                max_z: 4.0
+        </rosparam>
+    </test>
+</launch>

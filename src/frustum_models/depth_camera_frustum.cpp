@@ -339,10 +339,11 @@ bool DepthCameraFrustum::IsInside(const openvdb::Vec3d& pt)
 
   std::vector<VectorWithPt3D>::iterator it;
   for (it = _plane_normals.begin(); it != _plane_normals.end(); ++it) {
-    Eigen::Vector3d p_delta(pt[0] - it->initial_point[0],
-                            pt[1] - it->initial_point[1],
-                            pt[2] - it->initial_point[2]);
-    p_delta.normalize();
+    // Only the sign of the dot product matters, so p_delta is not normalized;
+    // this runs per active voxel per frustum every costmap cycle.
+    const Eigen::Vector3d p_delta(pt[0] - it->initial_point[0],
+                                  pt[1] - it->initial_point[1],
+                                  pt[2] - it->initial_point[2]);
 
     if (Dot(*it, p_delta) > 0.) {
       return false;

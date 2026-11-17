@@ -144,23 +144,26 @@ class RobotMotionTracker {
    * footprint polygons) for use by the voxel layer.
    *
    * @param readings Vector of robot motion readings to process.
+   * @param now Time that reading ages are measured against.
    * @return Vector of clearing frustums covering robot trajectories.
    */
   std::vector<std::unique_ptr<IClearingFrustum>>
-  GenerateRobotMotionClearingFrustums(
-      std::vector<RobotMotionReading>& readings);
+  GenerateRobotMotionClearingFrustums(std::vector<RobotMotionReading>& readings,
+                                      const ros::Time& now);
 
   /**
    * @brief Remove robots that haven't been updated within the stale threshold.
+   * @param now Time that reading ages are measured against.
    */
-  void RemoveStaleReadings();
+  void RemoveStaleReadings(const ros::Time& now);
 
  private:
   /**
    * @brief Generate clearing circles from all tracked robots.
+   * @param now Time that reading ages are measured against.
    * @return Vector of circles covering tracked robot trajectories.
    */
-  std::vector<std::unique_ptr<Circle>> GenerateCircles();
+  std::vector<std::unique_ptr<Circle>> GenerateCircles(const ros::Time& now);
   /**
    * @brief Construct a RobotMotionTracker with the given configuration.
    * @param config Configuration parameters.
@@ -209,18 +212,19 @@ class RobotMotionTracker {
                                const RobotMotionReading& reading);
 
   /**
-   * @brief Append polygon frustums from the footprint of each reading.
+   * @brief Append a polygon frustum per fresh reading of a moving peer.
    * @param readings Source readings containing footprint polygons.
+   * @param now Time that reading ages are measured against.
    * @param frustums Output vector to append polygon frustums to.
    */
   void AppendFootprintFrustums(
-      const std::vector<RobotMotionReading>& readings,
+      const std::vector<RobotMotionReading>& readings, const ros::Time& now,
       std::vector<std::unique_ptr<IClearingFrustum>>& frustums) const;
 
   /**
    * @brief Publish visualization markers for all tracked robots.
    */
-  void PublishVisualization();
+  void PublishVisualization(const ros::Time& now);
 
   /**
    * @brief Append CYLINDER markers for interpolated clearing circles.

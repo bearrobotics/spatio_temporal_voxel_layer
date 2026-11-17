@@ -23,12 +23,21 @@
  * Author: Vincent Benenati (vincent.benenati@bearrobotics.ai)
  *********************************************************************/
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <utility>
+#include <vector>
+
 #include "gtest/gtest.h"
+#include "multi_robot_public/RobotMotion.h"
 #include "ros/ros.h"
 #include "spatio_temporal_voxel_layer/robot_motion_reading.hpp"
 #include "spatio_temporal_voxel_layer/robot_motion_tracker.hpp"
 
 namespace {
+
+const ros::Time kNow(1000, 0);
 
 RobotMotionTracker::Config MakeValidConfig() {
   RobotMotionTracker::Config config;
@@ -46,7 +55,7 @@ RobotMotionTracker::Config MakeValidConfig() {
 RobotMotionReading MakeReading(const std::string& robot_id, double x, double y,
                                double vx, double vy, float radius) {
   RobotMotionReading reading;
-  reading.time_ = ros::Time::now();
+  reading.time_ = kNow;
   reading.robot_id_ = robot_id;
   reading.center_ = Eigen::Vector2d(x, y);
   reading.velocity_ = Eigen::Vector2d(vx, vy);
@@ -71,6 +80,37 @@ RobotMotionReading MakeReadingWithFootprint(const std::string& robot_id,
   boost::geometry::append(reading.footprint_.outer(),
                           RobotMotionReading::BoostPoint(x - half, y - half));
   return reading;
+}
+
+// Same open ring as the pennybot_4 costmap_common footprint.
+std::vector<std::pair<float, float>> MakeServiQFootprint() {
+  return {{0.2325f, 0.1748f},
+          {0.2325f, -0.1748f},
+          {-0.2325f, -0.1748f},
+          {-0.2325f, 0.1748f}};
+}
+
+multi_robot_public::RobotMotion MakeRobotMotion(
+    double x, double y, double yaw,
+    const std::vector<std::pair<float, float>>& footprint) {
+  multi_robot_public::RobotMotion robot_motion;
+  robot_motion.robot_id = "robot_1";
+  robot_motion.position.x = x;
+  robot_motion.position.y = y;
+  robot_motion.orientation.z = std::sin(yaw / 2.0);
+  robot_motion.orientation.w = std::cos(yaw / 2.0);
+  for (const auto& [point_x, point_y] : footprint) {
+    geometry_msgs::Point32& point =
+        robot_motion.robot_footprint.points.emplace_back();
+    point.x = point_x;
+    point.y = point_y;
+  }
+  return robot_motion;
+}
+
+bool IsInFootprint(const RobotMotionReading& reading, double x, double y) {
+  return boost::geometry::within(RobotMotionReading::BoostPoint(x, y),
+                                 reading.footprint_);
 }
 
 // =============================================================================
@@ -201,16 +241,15 @@ TEST_F(RobotMotionTrackerTest, DisabledTrackerReturnsNoFrustums) {
 
   std::vector<RobotMotionReading> readings = {
       MakeReading("robot_1", 0.0, 0.0, 1.0, 0.0, 0.3f)};
-  auto frustums = tracker->GenerateRobotMotionClearingFrustums(readings);
+  auto frustums = tracker->GenerateRobotMotionClearingFrustums(readings, kNow);
   EXPECT_TRUE(frustums.empty());
 }
 
 TEST_F(RobotMotionTrackerTest, SingleReadingProducesNoCircles) {
   // A single reading has no previous point to interpolate from, so no circles.
-  // It does produce a footprint polygon frustum if footprint is set.
   std::vector<RobotMotionReading> readings = {
       MakeReading("robot_1", 0.0, 0.0, 1.0, 0.0, 0.3f)};
-  auto frustums = tracker_->GenerateRobotMotionClearingFrustums(readings);
+  auto frustums = tracker_->GenerateRobotMotionClearingFrustums(readings, kNow);
   EXPECT_TRUE(frustums.empty());
 }
 
@@ -218,7 +257,7 @@ TEST_F(RobotMotionTrackerTest,
        SingleReadingWithFootprintProducesPolygonFrustum) {
   std::vector<RobotMotionReading> readings = {
       MakeReadingWithFootprint("robot_1", 0.0, 0.0, 1.0, 0.0, 0.3f, 0.6f)};
-  auto frustums = tracker_->GenerateRobotMotionClearingFrustums(readings);
+  auto frustums = tracker_->GenerateRobotMotionClearingFrustums(readings, kNow);
   EXPECT_EQ(frustums.size(), 1u);
 }
 
@@ -226,12 +265,13 @@ TEST_F(RobotMotionTrackerTest, BelowVelocityThresholdNoCircles) {
   // First call — adds track but doesn't enable it (velocity too low).
   std::vector<RobotMotionReading> readings1 = {
       MakeReading("robot_1", 0.0, 0.0, 0.0, 0.0, 0.3f)};
-  tracker_->GenerateRobotMotionClearingFrustums(readings1);
+  tracker_->GenerateRobotMotionClearingFrustums(readings1, kNow);
 
   // Second call — second position, still below threshold.
   std::vector<RobotMotionReading> readings2 = {
       MakeReading("robot_1", 1.0, 0.0, 0.0, 0.0, 0.3f)};
-  auto frustums = tracker_->GenerateRobotMotionClearingFrustums(readings2);
+  auto frustums =
+      tracker_->GenerateRobotMotionClearingFrustums(readings2, kNow);
   EXPECT_TRUE(frustums.empty());
 }
 
@@ -239,12 +279,13 @@ TEST_F(RobotMotionTrackerTest, AboveVelocityThresholdProducesCircles) {
   // First call — adds track with velocity above threshold (enables it).
   std::vector<RobotMotionReading> readings1 = {
       MakeReading("robot_1", 0.0, 0.0, 1.0, 0.0, 0.3f)};
-  tracker_->GenerateRobotMotionClearingFrustums(readings1);
+  tracker_->GenerateRobotMotionClearingFrustums(readings1, kNow);
 
   // Second call — second position, far enough apart to add a new reading.
   std::vector<RobotMotionReading> readings2 = {
       MakeReading("robot_1", 1.0, 0.0, 1.0, 0.0, 0.3f)};
-  auto frustums = tracker_->GenerateRobotMotionClearingFrustums(readings2);
+  auto frustums =
+      tracker_->GenerateRobotMotionClearingFrustums(readings2, kNow);
   EXPECT_GT(frustums.size(), 0u);
 }
 
@@ -253,12 +294,13 @@ TEST_F(RobotMotionTrackerTest, DifferentRobotIdsProduceSeparateTracks) {
   std::vector<RobotMotionReading> readings1 = {
       MakeReading("robot_1", 0.0, 0.0, 1.0, 0.0, 0.3f),
       MakeReading("robot_2", 5.0, 5.0, 0.0, 1.0, 0.3f)};
-  tracker_->GenerateRobotMotionClearingFrustums(readings1);
+  tracker_->GenerateRobotMotionClearingFrustums(readings1, kNow);
 
   std::vector<RobotMotionReading> readings2 = {
       MakeReading("robot_1", 1.0, 0.0, 1.0, 0.0, 0.3f),
       MakeReading("robot_2", 5.0, 6.0, 0.0, 1.0, 0.3f)};
-  auto frustums = tracker_->GenerateRobotMotionClearingFrustums(readings2);
+  auto frustums =
+      tracker_->GenerateRobotMotionClearingFrustums(readings2, kNow);
   // Both tracks should produce circles; expect more than from a single track.
   EXPECT_GT(frustums.size(), 0u);
 }
@@ -279,17 +321,17 @@ TEST_F(RobotMotionTrackerTest, StaleTrackDoesNotProduceCirclesAfterReset) {
   auto tracker = RobotMotionTracker::Create(config, nh);
 
   // Two readings with current timestamps, far enough apart → circles.
-  ros::Time t_now = ros::Time::now();
+  ros::Time t_now = kNow;
   RobotMotionReading r1 = MakeReading("robot_1", 0.0, 0.0, 1.0, 0.0, 0.3f);
   r1.time_ = t_now;
   RobotMotionReading r2 = MakeReading("robot_1", 1.0, 0.0, 1.0, 0.0, 0.3f);
   r2.time_ = t_now;
 
   std::vector<RobotMotionReading> readings1 = {r1};
-  tracker->GenerateRobotMotionClearingFrustums(readings1);
+  tracker->GenerateRobotMotionClearingFrustums(readings1, kNow);
   std::vector<RobotMotionReading> readings2 = {r2};
   auto before_frustums =
-      tracker->GenerateRobotMotionClearingFrustums(readings2);
+      tracker->GenerateRobotMotionClearingFrustums(readings2, kNow);
   EXPECT_GT(before_frustums.size(), 0u);
 
   // Feed a stale-timestamped reading to make the track's last reading old.
@@ -298,21 +340,21 @@ TEST_F(RobotMotionTrackerTest, StaleTrackDoesNotProduceCirclesAfterReset) {
   RobotMotionReading stale = MakeReading("robot_1", 1.5, 0.0, 1.0, 0.0, 0.3f);
   stale.time_ = ros::Time(0.001);  // epoch + 1ms = effectively in the past
   std::vector<RobotMotionReading> stale_readings = {stale};
-  tracker->GenerateRobotMotionClearingFrustums(stale_readings);
+  tracker->GenerateRobotMotionClearingFrustums(stale_readings, kNow);
 
   // Now call with a fresh reading — stale track is evicted, fresh one has 1
   // reading only → no circle pairs, no footprint polygon.
   std::vector<RobotMotionReading> fresh_readings = {
       MakeReading("robot_1", 2.0, 0.0, 1.0, 0.0, 0.3f)};
   auto after_frustums =
-      tracker->GenerateRobotMotionClearingFrustums(fresh_readings);
+      tracker->GenerateRobotMotionClearingFrustums(fresh_readings, kNow);
   EXPECT_TRUE(after_frustums.empty());
 }
 
 TEST_F(RobotMotionTrackerTest, FootprintFrustumContainsPointInsideFootprint) {
   std::vector<RobotMotionReading> readings = {
       MakeReadingWithFootprint("robot_1", 0.0, 0.0, 1.0, 0.0, 0.3f, 1.0f)};
-  auto frustums = tracker_->GenerateRobotMotionClearingFrustums(readings);
+  auto frustums = tracker_->GenerateRobotMotionClearingFrustums(readings, kNow);
   ASSERT_EQ(frustums.size(), 1u);
 
   // The footprint is a 1x1 square centered at (0,0): points inside should
@@ -322,6 +364,50 @@ TEST_F(RobotMotionTrackerTest, FootprintFrustumContainsPointInsideFootprint) {
 
   openvdb::Vec3d outside_point(5.0, 5.0, 0.5);
   EXPECT_FALSE(frustums[0]->IsInside(outside_point));
+}
+
+TEST_F(RobotMotionTrackerTest, FootprintFrustumOnlyForMovingRobot) {
+  std::vector<RobotMotionReading> readings = {
+      MakeReadingWithFootprint("moving_robot", 0.0, 0.0, 1.0, 0.0, 0.3f, 0.6f),
+      MakeReadingWithFootprint("parked_robot", 3.0, 0.0, 0.0, 0.0, 0.3f, 0.6f)};
+  auto frustums = tracker_->GenerateRobotMotionClearingFrustums(readings, kNow);
+  ASSERT_EQ(frustums.size(), 1u);
+  EXPECT_TRUE(frustums[0]->IsInside(openvdb::Vec3d(0.0, 0.0, 0.1)));
+  EXPECT_FALSE(frustums[0]->IsInside(openvdb::Vec3d(3.0, 0.0, 0.1)));
+}
+
+TEST_F(RobotMotionTrackerTest, StoppedRobotProducesNoFootprintFrustum) {
+  std::vector<RobotMotionReading> moving = {
+      MakeReadingWithFootprint("robot_1", 0.0, 0.0, 1.0, 0.0, 0.3f, 0.6f)};
+  ASSERT_EQ(tracker_->GenerateRobotMotionClearingFrustums(moving, kNow).size(),
+            1u);
+
+  std::vector<RobotMotionReading> stopped = {
+      MakeReadingWithFootprint("robot_1", 0.0, 0.0, 0.0, 0.0, 0.3f, 0.6f)};
+  EXPECT_TRUE(
+      tracker_->GenerateRobotMotionClearingFrustums(stopped, kNow).empty());
+}
+
+TEST_F(RobotMotionTrackerTest, StaleReadingProducesNoFootprintFrustum) {
+  RobotMotionReading stale =
+      MakeReadingWithFootprint("robot_1", 0.0, 0.0, 1.0, 0.0, 0.3f, 0.6f);
+  stale.time_ = kNow - ros::Duration(3.0);
+  std::vector<RobotMotionReading> readings = {stale};
+  auto frustums = tracker_->GenerateRobotMotionClearingFrustums(readings, kNow);
+  EXPECT_TRUE(frustums.empty());
+}
+
+TEST_F(RobotMotionTrackerTest, LateReadingInTheSameBatchClearsNothing) {
+  RobotMotionReading late =
+      MakeReadingWithFootprint("robot_1", 0.0, 0.0, 1.0, 0.0, 0.3f, 0.6f);
+  late.time_ = kNow - ros::Duration(3.0);
+  std::vector<RobotMotionReading> readings = {
+      late,
+      MakeReadingWithFootprint("robot_1", 2.0, 0.0, 1.0, 0.0, 0.3f, 0.6f)};
+  auto frustums = tracker_->GenerateRobotMotionClearingFrustums(readings, kNow);
+  ASSERT_EQ(frustums.size(), 1u);
+  EXPECT_TRUE(frustums[0]->IsInside(openvdb::Vec3d(2.0, 0.0, 0.1)));
+  EXPECT_FALSE(frustums[0]->IsInside(openvdb::Vec3d(0.0, 0.0, 0.1)));
 }
 
 TEST_F(RobotMotionTrackerTest, GenerateInterpolatedCircles) {
@@ -342,10 +428,121 @@ TEST_F(RobotMotionTrackerTest, GenerateInterpolatedCircles) {
   EXPECT_DOUBLE_EQ(circles.back()->center.x(), 4.0);
 }
 
+// =============================================================================
+// ToRobotMotionReading Tests
+// =============================================================================
+
+TEST(ToRobotMotionReadingTest, ClosesOpenFootprintRing) {
+  const RobotMotionReading reading =
+      ToRobotMotionReading(
+          MakeRobotMotion(0.0, 0.0, 0.0, MakeServiQFootprint()))
+          .value();
+  ASSERT_EQ(reading.footprint_.outer().size(),
+            MakeServiQFootprint().size() + 1);
+  EXPECT_TRUE(IsInFootprint(reading, 0.0, 0.0));
+  EXPECT_FALSE(IsInFootprint(reading, 0.0, 0.5));
+  EXPECT_FALSE(IsInFootprint(reading, 0.0, 20.0));
+}
+
+TEST(ToRobotMotionReadingTest, AcceptsCounterClockwiseFootprint) {
+  std::vector<std::pair<float, float>> footprint = MakeServiQFootprint();
+  std::reverse(footprint.begin(), footprint.end());
+  const RobotMotionReading reading =
+      ToRobotMotionReading(MakeRobotMotion(0.0, 0.0, 0.0, footprint)).value();
+  EXPECT_TRUE(IsInFootprint(reading, 0.0, 0.0));
+  EXPECT_FALSE(IsInFootprint(reading, 0.0, 0.5));
+}
+
+TEST(ToRobotMotionReadingTest, PlacesFootprintAtSenderPosition) {
+  const RobotMotionReading reading =
+      ToRobotMotionReading(
+          MakeRobotMotion(-3.77, -0.02, 0.0, MakeServiQFootprint()))
+          .value();
+  EXPECT_TRUE(IsInFootprint(reading, -3.77, -0.02));
+  EXPECT_TRUE(IsInFootprint(reading, -3.77 + 0.2, -0.02 + 0.15));
+  EXPECT_FALSE(IsInFootprint(reading, 0.0, 0.0));
+}
+
+TEST(ToRobotMotionReadingTest, RotatesFootprintBySenderYaw) {
+  const double yaw = M_PI / 6.0;
+  const RobotMotionReading reading =
+      ToRobotMotionReading(
+          MakeRobotMotion(2.0, 3.0, yaw, MakeServiQFootprint()))
+          .value();
+  const double dx = 0.2 * std::cos(yaw) - 0.15 * std::sin(yaw);
+  const double dy = 0.2 * std::sin(yaw) + 0.15 * std::cos(yaw);
+  EXPECT_TRUE(IsInFootprint(reading, 2.0 + dx, 3.0 + dy));
+  // The mirrored point is inside only when the rotation sign is flipped.
+  EXPECT_FALSE(IsInFootprint(reading, 2.0 + dx, 3.0 - dy));
+}
+
+TEST(ToRobotMotionReadingTest, CopiesMotionFields) {
+  multi_robot_public::RobotMotion robot_motion =
+      MakeRobotMotion(1.0, 2.0, 0.0, MakeServiQFootprint());
+  robot_motion.time = ros::Time(12.5);
+  robot_motion.velocity.x = 0.4;
+  robot_motion.velocity.y = -0.3;
+  robot_motion.robot_radius = 0.29f;
+  const RobotMotionReading reading = ToRobotMotionReading(robot_motion).value();
+  EXPECT_EQ(reading.robot_id_, robot_motion.robot_id);
+  EXPECT_EQ(reading.time_, ros::Time(12.5));
+  EXPECT_DOUBLE_EQ(reading.center_.x(), 1.0);
+  EXPECT_DOUBLE_EQ(reading.center_.y(), 2.0);
+  EXPECT_DOUBLE_EQ(reading.velocity_.x(), 0.4);
+  EXPECT_DOUBLE_EQ(reading.velocity_.y(), -0.3);
+  EXPECT_FLOAT_EQ(reading.radius_, 0.29f);
+}
+
+TEST(ToRobotMotionReadingTest, KeepsEmptyFootprintEmpty) {
+  const RobotMotionReading reading =
+      ToRobotMotionReading(MakeRobotMotion(1.0, 2.0, 0.0, {})).value();
+  EXPECT_TRUE(reading.footprint_.outer().empty());
+  EXPECT_DOUBLE_EQ(reading.center_.x(), 1.0);
+}
+
+TEST(ToRobotMotionReadingTest, DropsFootprintThatIsNotAPolygon) {
+  const RobotMotionReading reading =
+      ToRobotMotionReading(
+          MakeRobotMotion(1.0, 2.0, 0.0, {{0.2f, 0.1f}, {-0.2f, 0.1f}}))
+          .value();
+  EXPECT_TRUE(reading.footprint_.outer().empty());
+  EXPECT_DOUBLE_EQ(reading.center_.x(), 1.0);
+}
+
+TEST(ToRobotMotionReadingTest, DropsMotionWithNonFiniteNumbers) {
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const double infinity = std::numeric_limits<double>::infinity();
+
+  multi_robot_public::RobotMotion nan_x =
+      MakeRobotMotion(nan, 2.0, 0.0, MakeServiQFootprint());
+  EXPECT_FALSE(ToRobotMotionReading(nan_x).has_value());
+
+  multi_robot_public::RobotMotion infinite_y =
+      MakeRobotMotion(1.0, infinity, 0.0, MakeServiQFootprint());
+  EXPECT_FALSE(ToRobotMotionReading(infinite_y).has_value());
+
+  multi_robot_public::RobotMotion nan_yaw =
+      MakeRobotMotion(1.0, 2.0, 0.0, MakeServiQFootprint());
+  nan_yaw.orientation.w = nan;
+  EXPECT_FALSE(ToRobotMotionReading(nan_yaw).has_value());
+
+  multi_robot_public::RobotMotion nan_velocity =
+      MakeRobotMotion(1.0, 2.0, 0.0, MakeServiQFootprint());
+  nan_velocity.velocity.x = nan;
+  EXPECT_FALSE(ToRobotMotionReading(nan_velocity).has_value());
+
+  multi_robot_public::RobotMotion infinite_radius =
+      MakeRobotMotion(1.0, 2.0, 0.0, MakeServiQFootprint());
+  infinite_radius.robot_radius = std::numeric_limits<float>::infinity();
+  EXPECT_FALSE(ToRobotMotionReading(infinite_radius).has_value());
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   ros::init(argc, argv, "test_robot_motion_tracker");
+  // ROS_WARN_THROTTLE reads ros::Time, which the first NodeHandle initializes.
+  ros::NodeHandle node_handle;
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

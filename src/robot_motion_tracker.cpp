@@ -204,7 +204,7 @@ void RobotMotionTracker::AddNewReading(const RobotMotionReading& reading) {
 
 std::vector<std::unique_ptr<geometry::IClearingFrustum>>
 RobotMotionTracker::GenerateRobotMotionClearingFrustums(
-    std::vector<RobotMotionReading>& readings) {
+    std::vector<RobotMotionReading>& readings, const ros::Time& now) {
   if (!config_.enable) {
     return {};
   }
@@ -217,26 +217,30 @@ RobotMotionTracker::GenerateRobotMotionClearingFrustums(
     }
     UpdateExistingReading(it->second, reading);
   }
-  RemoveStaleReadings();
+  RemoveStaleReadings(now);
 
   std::vector<std::unique_ptr<IClearingFrustum>> frustums;
-  for (auto& circle : GenerateCircles()) {
+  for (auto& circle : GenerateCircles(now)) {
     frustums.push_back(std::move(circle));
   }
-  AppendFootprintFrustums(readings, frustums);
+  AppendFootprintFrustums(readings, now, frustums);
 
   if (config_.publish_visualization) {
-    PublishVisualization();
+    PublishVisualization(now);
   }
 
   return frustums;
 }
 
 void RobotMotionTracker::AppendFootprintFrustums(
-    const std::vector<RobotMotionReading>& readings,
+    const std::vector<RobotMotionReading>& readings, const ros::Time& now,
     std::vector<std::unique_ptr<IClearingFrustum>>& frustums) const {
   for (const RobotMotionReading& reading : readings) {
-    if (reading.footprint_.outer().empty()) {
+    // A stopped peer clears nothing: the footprint is wider than the peer.
+    const bool is_moving = ExceedsActivationVelocity(reading.velocity_);
+    const bool is_fresh =
+        (now - reading.time_).toSec() <= config_.stale_time_threshold;
+    if (reading.footprint_.outer().empty() || !is_moving || !is_fresh) {
       continue;
     }
     auto polygon_frustum = std::make_unique<geometry::Polygon>();
@@ -248,10 +252,9 @@ void RobotMotionTracker::AppendFootprintFrustums(
 }
 
 std::vector<std::unique_ptr<RobotMotionTracker::Circle>>
-RobotMotionTracker::GenerateCircles() {
+RobotMotionTracker::GenerateCircles(const ros::Time& now) {
   std::vector<std::unique_ptr<Circle>> circles;
-  const ros::Time cutoff_time =
-      ros::Time::now() - ros::Duration(config_.past_time_window);
+  const ros::Time cutoff_time = now - ros::Duration(config_.past_time_window);
 
   for (const auto& [robot_id, track_info] : track_map_) {
     if (!track_info.enabled) {
@@ -284,10 +287,9 @@ RobotMotionTracker::GenerateCircles() {
   return circles;
 }
 
-void RobotMotionTracker::RemoveStaleReadings() {
+void RobotMotionTracker::RemoveStaleReadings(const ros::Time& now) {
   for (auto it = track_map_.begin(); it != track_map_.end();) {
-    const double time_diff =
-        (ros::Time::now() - it->second.readings.back().time_).toSec();
+    const double time_diff = (now - it->second.readings.back().time_).toSec();
     if (time_diff > config_.stale_time_threshold) {
       it = track_map_.erase(it);
     } else {
@@ -401,14 +403,13 @@ void RobotMotionTracker::AppendFootprintMarkers(
   }
 }
 
-void RobotMotionTracker::PublishVisualization() {
+void RobotMotionTracker::PublishVisualization(const ros::Time& now) {
   visualization_msgs::MarkerArray marker_array;
 
   visualization_msgs::Marker& delete_all_marker =
       marker_array.markers.emplace_back();
   delete_all_marker.action = visualization_msgs::Marker::DELETEALL;
 
-  const ros::Time now = ros::Time::now();
   const ros::Time cutoff_time = now - ros::Duration(config_.past_time_window);
   int marker_id = 0;
 

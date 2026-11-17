@@ -1,6 +1,6 @@
 <launch>
     <test test-name="test_robot_motion_tracker" pkg="spatio_temporal_voxel_layer"
-        type="test_robot_motion_tracker"
+        type="test_robot_motion_tracker" time-limit="$(env TEST_TIMEOUT)"
         bazel="ROS/external/navigation/spatio_temporal_voxel_layer/test_robot_motion_tracker_runner">
         <rosparam command="load" ns="/robot_motion_tracker">
             valid:

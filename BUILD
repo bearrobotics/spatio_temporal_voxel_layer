@@ -90,6 +90,7 @@ cc_binary(
         "src/frustum_models/three_dimensional_lidar_frustum.cpp",
         "src/measurement_buffer.cpp",
         "src/noise_filter.cpp",
+        "src/robot_motion_reading.cpp",
         "src/robot_motion_tracker.cpp",
         "src/spatio_temporal_voxel_grid.cpp",
         "src/spatio_temporal_voxel_layer.cpp",
@@ -253,6 +254,7 @@ cc_ros_test(
     launch_file = "test/test_robot_motion_tracker.test",
     deps = [
         ":spatio_temporal_voxel_layer_plugin",
+        "//ROS/multi_robot/public:cc_msgs",
         "//third_party/ros:roscpp",
         "@eigen",
         "@gtests//:gtest",

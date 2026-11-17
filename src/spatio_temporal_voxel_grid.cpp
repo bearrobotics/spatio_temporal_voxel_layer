@@ -300,7 +300,7 @@ void SpatioTemporalVoxelGrid::ClearFrustums(
           dynamic_obstacle_readings);
   auto robot_motion_frustums =
       _robot_motion_tracker->GenerateRobotMotionClearingFrustums(
-          robot_motion_readings);
+          robot_motion_readings, ros::Time::now());
   dynamic_obstacle_frustums.insert(
       dynamic_obstacle_frustums.end(),
       std::make_move_iterator(robot_motion_frustums.begin()),

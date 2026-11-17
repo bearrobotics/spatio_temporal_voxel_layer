@@ -790,14 +790,8 @@ void SpatioTemporalVoxelLayer::RobotMotionCallback(
     const multi_robot_public::RobotMotionsConstPtr& msg) {
   std::scoped_lock lock(_robot_motion_lock);
   for (const auto& robot : msg->robot_list) {
-    RobotMotionReading& reading = _robot_motion_readings.emplace_back();
-    reading.robot_id_ = robot.robot_id;
-    reading.time_ = robot.time;
-    reading.center_ = {robot.position.x, robot.position.y};
-    reading.velocity_ = {robot.velocity.x, robot.velocity.y};
-    reading.radius_ = robot.robot_radius;
-    for (const auto& pt : robot.robot_footprint.points) {
-      reading.footprint_.outer().emplace_back(pt.x, pt.y);
+    if (auto reading = ToRobotMotionReading(robot)) {
+      _robot_motion_readings.push_back(std::move(*reading));
     }
   }
 }

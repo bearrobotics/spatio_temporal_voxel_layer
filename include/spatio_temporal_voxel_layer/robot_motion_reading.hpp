@@ -28,8 +28,10 @@
 
 #include <Eigen/Dense>
 #include <boost/geometry.hpp>
+#include <optional>
 #include <string>
 
+#include "multi_robot_public/RobotMotion.h"
 #include "ros/ros.h"
 
 /**
@@ -59,5 +61,15 @@ struct RobotMotionReading {
   /// Robot footprint polygon in the map frame.
   Polygon footprint_;
 };
+
+/**
+ * @brief Convert a RobotMotion message into a reading in the map frame.
+ * @param robot_motion Message whose footprint is in the sender's base frame.
+ * @return Reading with the footprint placed at the sender's pose, or nullopt
+ *         when a number in the message is not finite. An invalid footprint is
+ *         left empty.
+ */
+std::optional<RobotMotionReading> ToRobotMotionReading(
+    const multi_robot_public::RobotMotion& robot_motion);
 
 #endif  // SPATIO_TEMPORAL_VOXEL_LAYER_ROBOT_MOTION_READING_HPP

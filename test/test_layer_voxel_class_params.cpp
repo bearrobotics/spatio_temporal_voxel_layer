@@ -23,6 +23,7 @@
  * Author: Seung-Hun (Hoon) Han (seunghun.han@bearrobotics.ai)
  *********************************************************************/
 
+#include <bear_msgs/ClassMap.h>
 #include <bear_msgs/ClearClassVoxels.h>
 #include <costmap_2d/cost_values.h>
 #include <costmap_2d/costmap_2d.h>
@@ -36,7 +37,10 @@
 
 #include <boost/make_shared.hpp>
 #include <boost/shared_ptr.hpp>
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
+#include <optional>
 #include <string>
 
 #include "gtest/gtest.h"
@@ -47,6 +51,7 @@ namespace {
 
 using spatio_temporal_voxel_layer::SpatioTemporalVoxelLayer;
 using spatio_temporal_voxel_layer::test_utils::MakePointCloud;
+using spatio_temporal_voxel_layer::test_utils::MaskAt;
 
 // The ns of the rosparam block in test_layer_voxel_class_params.test.
 constexpr char kParamNamespace[] = "/stvl_layer_params_test";
@@ -87,6 +92,27 @@ constexpr char kGatedSourceTopic[] =
 // The layer serves toggle_enabled under <namespace>/<layer name>/<source>.
 constexpr char kGatedSourceToggleService[] =
     "/stvl_layer_params_test/hit_streak_reset/gated_camera/toggle_enabled";
+constexpr char kClassMapPublisherLayer[] = "class_map_publisher";
+constexpr char kClassMapTopic[] =
+    "/stvl_layer_params_test/class_map_publisher/class_map";
+constexpr char kClassMapFramesTopic[] =
+    "/stvl_layer_params_test/class_map_frames";
+constexpr char kClassifiedClassMapTopic[] =
+    "/stvl_layer_params_test/classified/class_map";
+constexpr char kSmallClassMapWindowLayer[] = "small_class_map_window";
+constexpr char kSmallClassMapWindowTopic[] =
+    "/stvl_layer_params_test/small_class_map_window/class_map";
+// Must match class_map_window_width_m of small_class_map_window.
+constexpr double kSmallClassMapWindowWidthM = 4.0;
+constexpr char kZeroClassMapWindowLayer[] = "zero_class_map_window";
+constexpr char kNanClassMapWindowLayer[] = "nan_class_map_window";
+constexpr char kOversizedClassMapWindowLayer[] = "oversized_class_map_window";
+constexpr char kStringPublishClassMapLayer[] = "string_publish_class_map";
+constexpr char kStringClassMapWindowLayer[] = "string_class_map_window";
+constexpr char kClassMapType[] = "bear_msgs/ClassMap";
+constexpr double kDefaultClassMapWindowWidthM = 20.0;
+constexpr uint16_t kVehicleBit =
+    volume_grid::ToClassBit(volume_grid::VoxelClass::kVehicle);
 
 bool IsAdvertised(const std::string& topic_name, const std::string& datatype) {
   ros::master::V_TopicInfo topics;
@@ -231,9 +257,34 @@ class LayerVoxelClassParamsTest : public ::testing::Test {
                               costmap_2d::LETHAL_OBSTACLE);
   }
 
+  boost::shared_ptr<SpatioTemporalVoxelLayer> InitializeClassMapLayer(
+      const std::string& layer_name, const std::string& class_map_topic) {
+    class_map_subscriber_ = parent_nh_.subscribe(
+        class_map_topic, 1, &LayerVoxelClassParamsTest::OnClassMap, this);
+    frame_publisher_ =
+        parent_nh_.advertise<sensor_msgs::PointCloud2>(kClassMapFramesTopic, 1);
+    return InitializeLayer(layer_name);
+  }
+
+  void OnClassMap(const bear_msgs::ClassMap::ConstPtr& map) {
+    last_class_map_ = map;
+  }
+
+  // Maps arrive via the global callback queue; wait for this updateMap's map.
+  bear_msgs::ClassMap::ConstPtr UpdateAndTakeClassMap() {
+    const ros::Time update_start = ros::Time::now();
+    layered_costmap_.updateMap(0.0, 0.0, 0.0);
+    while (!last_class_map_ || last_class_map_->header.stamp < update_start) {
+      ros::getGlobalCallbackQueue()->callAvailable(ros::WallDuration(0.01));
+    }
+    return last_class_map_;
+  }
+
   ros::NodeHandle parent_nh_;
   costmap_2d::LayeredCostmap layered_costmap_;
   ros::Publisher frame_publisher_;
+  ros::Subscriber class_map_subscriber_;
+  bear_msgs::ClassMap::ConstPtr last_class_map_;
   ros::Time next_frame_stamp_ = kFirstFrameStamp;
 };
 
@@ -243,6 +294,99 @@ TEST_F(LayerVoxelClassParamsTest, ClassifiedSourcesInitializeAndStartEmpty) {
 
 TEST_F(LayerVoxelClassParamsTest, SourcesDefaultToGenericWithoutVoxelClasses) {
   ExpectInitializedAndEmpty(InitializeLayer(kGenericOnlyLayer));
+}
+
+TEST_F(LayerVoxelClassParamsTest, ClassMapIsAdvertisedWhenAClassPublishesIt) {
+  ExpectInitializedAndEmpty(InitializeLayer(kClassMapPublisherLayer));
+
+  EXPECT_TRUE(IsAdvertised(kClassMapTopic, kClassMapType));
+}
+
+TEST_F(LayerVoxelClassParamsTest,
+       ClassMapIsNotAdvertisedWithoutAPublishingClass) {
+  ExpectInitializedAndEmpty(InitializeLayer(kClassifiedLayer));
+
+  EXPECT_FALSE(IsAdvertised(kClassifiedClassMapTopic, kClassMapType));
+}
+
+TEST_F(LayerVoxelClassParamsTest, ClassMapReportsTheMarkedColumnToASubscriber) {
+  InitializeClassMapLayer(kClassMapPublisherLayer, kClassMapTopic);
+  ASSERT_TRUE(ros::ok());
+
+  PublishHitAndUpdate();
+  const bear_msgs::ClassMap::ConstPtr map = UpdateAndTakeClassMap();
+
+  ASSERT_TRUE(map);
+  EXPECT_EQ(map->header.frame_id, kGlobalFrame);
+  EXPECT_FLOAT_EQ(map->info.resolution, kResolution);
+  ASSERT_EQ(map->class_names.size(), volume_grid::kVoxelClassCount);
+  EXPECT_EQ(map->class_names[static_cast<std::size_t>(
+                volume_grid::VoxelClass::kVehicle)],
+            "vehicle");
+  EXPECT_EQ(map->class_names[static_cast<std::size_t>(
+                volume_grid::VoxelClass::kCliff)],
+            "");
+  // The hit sits on a voxel edge; probe the voxel centre.
+  EXPECT_EQ(MaskAt(*map, kHitX + kResolution / 2.0, kHitY + kResolution / 2.0),
+            kVehicleBit);
+  EXPECT_NEAR(map->window_min.x, -kDefaultClassMapWindowWidthM / 2.0,
+              kResolution);
+  EXPECT_NEAR(map->window_min.y, -kDefaultClassMapWindowWidthM / 2.0,
+              kResolution);
+  EXPECT_NEAR(map->window_max.x, kDefaultClassMapWindowWidthM / 2.0,
+              kResolution);
+  EXPECT_NEAR(map->window_max.y, kDefaultClassMapWindowWidthM / 2.0,
+              kResolution);
+}
+
+TEST_F(LayerVoxelClassParamsTest, ClassMapWindowFollowsTheParam) {
+  InitializeClassMapLayer(kSmallClassMapWindowLayer, kSmallClassMapWindowTopic);
+  ASSERT_TRUE(ros::ok());
+
+  const bear_msgs::ClassMap::ConstPtr map = UpdateAndTakeClassMap();
+
+  ASSERT_TRUE(map);
+  EXPECT_NEAR(map->window_min.x, -kSmallClassMapWindowWidthM / 2.0,
+              kResolution);
+  EXPECT_NEAR(map->window_min.y, -kSmallClassMapWindowWidthM / 2.0,
+              kResolution);
+  EXPECT_NEAR(map->window_max.x, kSmallClassMapWindowWidthM / 2.0, kResolution);
+  EXPECT_NEAR(map->window_max.y, kSmallClassMapWindowWidthM / 2.0, kResolution);
+}
+
+TEST_F(LayerVoxelClassParamsTest, ZeroClassMapWindowTerminatesAtStartup) {
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+
+  EXPECT_DEATH(InitializeLayer(kZeroClassMapWindowLayer),
+               "class_map_window_width_m is 0; it must be at least 2 voxels");
+}
+
+TEST_F(LayerVoxelClassParamsTest, NonFiniteClassMapWindowTerminatesAtStartup) {
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+
+  EXPECT_DEATH(InitializeLayer(kNanClassMapWindowLayer),
+               "class_map_window_width_m is nan; it must be at least 2 voxels");
+}
+
+TEST_F(LayerVoxelClassParamsTest, OversizedClassMapWindowTerminatesAtStartup) {
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+
+  EXPECT_DEATH(InitializeLayer(kOversizedClassMapWindowLayer),
+               "class_map_window_width_m is 100.5; .* at most 100 m");
+}
+
+TEST_F(LayerVoxelClassParamsTest, MistypedPublishClassMapTerminatesAtStartup) {
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+
+  EXPECT_DEATH(InitializeLayer(kStringPublishClassMapLayer),
+               "publish_class_map must be a bool");
+}
+
+TEST_F(LayerVoxelClassParamsTest, MistypedClassMapWindowTerminatesAtStartup) {
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+
+  EXPECT_DEATH(InitializeLayer(kStringClassMapWindowLayer),
+               "class_map_window_width_m must be a number");
 }
 
 TEST_F(LayerVoxelClassParamsTest, CliffClassWithoutStoreAtZInitializes) {
@@ -401,9 +545,8 @@ TEST_F(LayerVoxelClassParamsTest, ZeroSecondsToBreakTerminatesAtStartup) {
 TEST_F(LayerVoxelClassParamsTest, MistypedSecondsToBreakTerminatesAtStartup) {
   ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
 
-  EXPECT_DEATH(
-      InitializeLayer(kStringSecondsToBreakLayer),
-      "seconds_to_break must be a positive finite number, got .*1\\.5");
+  EXPECT_DEATH(InitializeLayer(kStringSecondsToBreakLayer),
+               "seconds_to_break must be a number, got .*1\\.5");
 }
 
 TEST_F(LayerVoxelClassParamsTest, NonFiniteSecondsToBreakTerminatesAtStartup) {

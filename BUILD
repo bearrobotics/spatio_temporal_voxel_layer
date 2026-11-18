@@ -80,6 +80,7 @@ cc_ros_dynamic_reconfigure(
 cc_binary(
     name = "libspatio_temporal_voxel_layer.so",
     srcs = [
+        "src/class_map_builder.cpp",
         "src/dynamic_obstacle_tracker.cpp",
         "src/filter_factory.cpp",
         "src/frustum_factory.cpp",
@@ -181,6 +182,7 @@ cc_library(
     includes = ["."],
     deps = [
         ":spatio_temporal_voxel_layer_plugin",
+        "//bear_msgs:cc_bear_msgs",
         "//third_party/ros:cc_geometry_msgs",
         "//third_party/ros:cc_sensor_msgs",
         "//third_party/ros:cc_sensor_msgs_lib",
@@ -465,6 +467,21 @@ cc_ros_test(
     deps = [
         ":spatio_temporal_voxel_layer_plugin",
         ":test_utils",
+        "//third_party/ros:roscpp",
+        "@gtests//:gtest",
+        "@openvdb",
+    ],
+)
+
+cc_ros_test(
+    name = "test_class_map",
+    size = "small",
+    srcs = ["test/test_class_map.cpp"],
+    launch_file = "test/test_class_map.test",
+    deps = [
+        ":spatio_temporal_voxel_layer_plugin",
+        ":test_utils",
+        "//bear_msgs:cc_bear_msgs",
         "//third_party/ros:roscpp",
         "@gtests//:gtest",
         "@openvdb",

@@ -1,0 +1,6 @@
+<launch>
+    <test test-name="test_class_map" pkg="spatio_temporal_voxel_layer"
+          type="test_class_map"
+          bazel="ROS/external/navigation/spatio_temporal_voxel_layer/test_class_map_runner"
+          time-limit="60" />
+</launch>

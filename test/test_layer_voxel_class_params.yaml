@@ -268,3 +268,55 @@ string_store_at_z:
 
 generic_only:
   <<: *layer_defaults
+
+vehicle_class_map: &vehicle_class_map
+  decay: 30.0
+  priority: 5
+  publish_class_voxels: false
+  publish_class_map: true
+  cleared_by:
+    frustums: true
+    dynamic_obstacles: false
+    footprint_clear: false
+    front_blind_spot: false
+    inter_sensor_decay: false
+
+class_map_publisher: &class_map_publisher
+  <<: *layer_defaults
+  observation_sources: "vehicle_camera"
+  voxel_classes:
+    vehicle: *vehicle_class_map
+  vehicle_camera:
+    <<: *source_defaults
+    topic: /stvl_layer_params_test/class_map_frames
+    sensor_frame: ""
+    clearing: false
+    clear_after_reading: false
+    voxel_class: vehicle
+
+small_class_map_window:
+  <<: *class_map_publisher
+  class_map_window_width_m: 4.0
+
+zero_class_map_window:
+  <<: *layer_defaults
+  class_map_window_width_m: 0.0
+
+nan_class_map_window:
+  <<: *layer_defaults
+  class_map_window_width_m: .nan
+
+oversized_class_map_window:
+  <<: *layer_defaults
+  class_map_window_width_m: 100.5
+
+string_class_map_window:
+  <<: *layer_defaults
+  class_map_window_width_m: "20"
+
+string_publish_class_map:
+  <<: *layer_defaults
+  voxel_classes:
+    vehicle:
+      <<: *vehicle_class_map
+      publish_class_map: "true"

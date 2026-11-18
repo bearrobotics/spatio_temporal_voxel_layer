@@ -76,9 +76,12 @@
 
 #include "spatio_temporal_voxel_layer/spatio_temporal_voxel_layer.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <type_traits>
 
 #include "bearlib/ros/param_loader.h"
 #include "spatio_temporal_voxel_layer/filter_factory.h"
@@ -93,19 +96,32 @@ using volume_grid::VoxelClass;
 using volume_grid::VoxelClassPolicy;
 using volume_grid::VoxelClassTable;
 
-// Raw read first: a non-number must stop the layer, not count as unset.
-std::optional<double> LoadStoreAtZ(const ros::NodeHandle& class_nh) {
+// Half the window width must reach past the 8 m behavior tree lookahead.
+constexpr double kDefaultClassMapWindowWidthM = 20.0;
+// One voxel past the robot on every side.
+constexpr int kMinClassMapWindowWidthVoxels = 2;
+// A 100 m window at 0.05 m already reserves an 8 MB mask.
+constexpr double kMaxClassMapWindowWidthM = 100.0;
+
+// Unlike bear::lib::ros::LoadOptionalParam, a mistyped value is fatal.
+template <typename T>
+std::optional<T> LoadStrictOptionalParam(const ros::NodeHandle& nh,
+                                         const std::string& key) {
+  static_assert(std::is_same_v<T, bool> || std::is_same_v<T, double>,
+                "add the type's name to the message below");
   XmlRpc::XmlRpcValue raw;
-  if (!class_nh.getParam("store_at_z", raw)) {
+  if (!nh.getParam(key, raw)) {
     return std::nullopt;
   }
-  double store_at_z = 0.0;
-  if (!class_nh.getParam("store_at_z", store_at_z)) {
-    ROS_FATAL_STREAM(class_nh.getNamespace()
-                     << "/store_at_z must be a number, got " << raw.toXml());
+  T value{};
+  if (!nh.getParam(key, value)) {
+    ROS_FATAL_STREAM(nh.getNamespace()
+                     << "/" << key << " must be "
+                     << (std::is_same_v<T, bool> ? "a bool" : "a number")
+                     << ", got " << raw.toXml());
     std::terminate();
   }
-  return store_at_z;
+  return value;
 }
 
 // Raw read first: a non-integer must stop the layer, not count as unset.
@@ -131,19 +147,15 @@ std::optional<int> LoadHitStreakThreshold(const ros::NodeHandle& nh,
   return threshold;
 }
 
-// Raw read first: a non-number must stop the layer, not count as unset.
 std::optional<double> LoadSecondsToBreak(const ros::NodeHandle& hit_streak_nh) {
-  XmlRpc::XmlRpcValue raw;
-  if (!hit_streak_nh.getParam("seconds_to_break", raw)) {
-    return std::nullopt;
-  }
-  double seconds_to_break = 0.0;
-  if (!hit_streak_nh.getParam("seconds_to_break", seconds_to_break) ||
-      !std::isfinite(seconds_to_break) || seconds_to_break <= 0.0) {
+  const std::optional<double> seconds_to_break =
+      LoadStrictOptionalParam<double>(hit_streak_nh, "seconds_to_break");
+  if (seconds_to_break &&
+      (!std::isfinite(*seconds_to_break) || *seconds_to_break <= 0.0)) {
     ROS_FATAL_STREAM(hit_streak_nh.getNamespace()
                      << "/seconds_to_break must be a positive finite number, "
                         "got "
-                     << raw.toXml());
+                     << *seconds_to_break << ".");
     std::terminate();
   }
   return seconds_to_break;
@@ -192,7 +204,10 @@ void LoadVoxelClasses(ros::NodeHandle& nh, VoxelClassTable::Config& config) {
     policy.priority = LoadRequiredParam<int>(class_nh, "priority");
     policy.publish_class_voxels =
         LoadRequiredParam<bool>(class_nh, "publish_class_voxels");
-    policy.store_at_z = LoadStoreAtZ(class_nh);
+    policy.publish_class_map =
+        LoadStrictOptionalParam<bool>(class_nh, "publish_class_map")
+            .value_or(false);
+    policy.store_at_z = LoadStrictOptionalParam<double>(class_nh, "store_at_z");
 
     // Ignoring a leftover confirmation block would turn the gate off.
     if (class_nh.hasParam("confirmation")) {
@@ -287,6 +302,22 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
   _voxel_size = layered_costmap_->getCostmap()->getResolution() *
                 bear::lib::ros::LoadRequiredParam<double>(
                     nh, "voxel_size_costmap_resolution_multiplier");
+  const double class_map_window_width_m =
+      LoadStrictOptionalParam<double>(nh, "class_map_window_width_m")
+          .value_or(kDefaultClassMapWindowWidthM);
+  const double min_class_map_window_width_m =
+      kMinClassMapWindowWidthVoxels * _voxel_size;
+  if (!std::isfinite(class_map_window_width_m) ||
+      class_map_window_width_m < min_class_map_window_width_m ||
+      class_map_window_width_m > kMaxClassMapWindowWidthM) {
+    ROS_FATAL_STREAM(nh.getNamespace()
+                     << "/class_map_window_width_m is "
+                     << class_map_window_width_m << "; it must be at least "
+                     << kMinClassMapWindowWidthVoxels << " voxels ("
+                     << min_class_map_window_width_m << " m) and at most "
+                     << kMaxClassMapWindowWidthM << " m.");
+    std::terminate();
+  }
   // 1=takes highest in layers, 0=takes current layer
   _combination_method =
       bear::lib::ros::LoadRequiredParam<int>(nh, "combination_method");
@@ -446,6 +477,18 @@ void SpatioTemporalVoxelLayer::onInitialize(void)
         volume_grid::ToClassName(row.voxel_class) + "_voxel_grid";
     _class_voxel_pubs.push_back(
         {row.voxel_class, nh.advertise<sensor_msgs::PointCloud2>(topic, 1)});
+  }
+  const bool publishes_class_map =
+      std::any_of(class_config.rows.begin(), class_config.rows.end(),
+                  [](const volume_grid::VoxelClassTable::Row& row) {
+                    return row.policy.publish_class_map;
+                  });
+  if (publishes_class_map) {
+    _class_map_publisher = ClassMapPublisher{
+        nh.advertise<bear_msgs::ClassMap>("class_map", 1),
+        volume_grid::ClassMapBuilder(_voxel_size, class_map_window_width_m,
+                                     *class_table),
+        volume_grid::ClassMapColumns{}, bear_msgs::ClassMap{}};
   }
   _blind_spot_pub =
       nh.advertise<visualization_msgs::Marker>("blind_spot_point", 1);
@@ -1260,6 +1303,11 @@ void SpatioTemporalVoxelLayer::updateBounds(double robot_x, double robot_y,
 
   useExtraBounds(min_x, min_y, max_x, max_y);
   _voxel_grid->SetRobotPose(robot_x, robot_y, robot_yaw);
+  // Mapping mode skips the decay pass that records the columns.
+  const bool wants_class_map =
+      !_mapping_mode && _class_map_publisher &&
+      _class_map_publisher->publisher.getNumSubscribers() > 0;
+  _voxel_grid->SetClassMapRecording(wants_class_map);
 
   bool current = true;
   std::vector<observation::MeasurementReading> marking_observations,
@@ -1300,6 +1348,10 @@ void SpatioTemporalVoxelLayer::updateBounds(double robot_x, double robot_y,
   // update the ROS Layered Costmap
   UpdateROSCostmap(min_x, min_y, max_x, max_y, cleared_cells);
 
+  if (wants_class_map) {
+    _voxel_grid->TakeClassMap(&_class_map_publisher->columns);
+  }
+
   // publish point cloud in navigation mode
   bool is_time_limit_reached =
       ros::Time::now() > last_publish_time_ + publish_voxel_map_period_;
@@ -1317,7 +1369,11 @@ void SpatioTemporalVoxelLayer::updateBounds(double robot_x, double robot_y,
 
   // update footprint
   updateFootprint(robot_x, robot_y, robot_yaw, min_x, min_y, max_x, max_y);
-  return;
+
+  // Not throttled by publish_voxel_map_period; subscribers need every update.
+  if (wants_class_map) {
+    PublishClassMap(robot_x, robot_y);
+  }
 }
 
 /*****************************************************************************/
@@ -1401,6 +1457,26 @@ void SpatioTemporalVoxelLayer::PublishClassVoxelGrids()
     pc2->header.stamp = stamp;
     class_pub.publisher.publish(*pc2);
   }
+}
+
+/*****************************************************************************/
+void SpatioTemporalVoxelLayer::PublishClassMap(double robot_x, double robot_y)
+/*****************************************************************************/
+{
+  ClassMapPublisher& class_map_pub = *_class_map_publisher;
+  const ros::WallTime build_start = ros::WallTime::now();
+  class_map_pub.builder.Fill(class_map_pub.columns, robot_x, robot_y,
+                             &class_map_pub.msg);
+  const ros::Time stamp = ros::Time::now();
+  class_map_pub.msg.header.frame_id = _global_frame;
+  class_map_pub.msg.header.stamp = stamp;
+  class_map_pub.msg.info.map_load_time = stamp;
+  ROS_DEBUG_THROTTLE(
+      5.0, "class_map: %u x %u cells, %zu bytes, built in %.0f us",
+      class_map_pub.msg.info.width, class_map_pub.msg.info.height,
+      class_map_pub.msg.mask.size() * sizeof(class_map_pub.msg.mask[0]),
+      (ros::WallTime::now() - build_start).toSec() * 1e6);
+  class_map_pub.publisher.publish(class_map_pub.msg);
 }
 
 void SpatioTemporalVoxelLayer::PublishBlindSpotPoint(

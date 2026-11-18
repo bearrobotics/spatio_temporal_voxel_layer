@@ -27,12 +27,15 @@
 #ifndef SPATIO_TEMPORAL_VOXEL_LAYER_TEST_UTILS_H_
 #define SPATIO_TEMPORAL_VOXEL_LAYER_TEST_UTILS_H_
 
+#include <bear_msgs/ClassMap.h>
 #include <geometry_msgs/Point.h>
 #include <openvdb/openvdb.h>
 #include <sensor_msgs/PointCloud2.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "spatio_temporal_voxel_layer/dynamic_obstacle_tracker.hpp"
@@ -120,6 +123,10 @@ sensor_msgs::PointCloud2 MakePointCloud(
 // decay_seconds sets generic, cliff and vehicle; cliff ranks above vehicle.
 volume_grid::VoxelClassTable MakeCliffAndVehicleTable(
     double decay_seconds, int cliff_hits_to_promote);
+
+// nullopt when (x, y) is outside the box.
+std::optional<uint16_t> MaskAt(const bear_msgs::ClassMap& map, double x,
+                               double y);
 
 // Test constants
 constexpr float kVoxelSize = 0.05f;

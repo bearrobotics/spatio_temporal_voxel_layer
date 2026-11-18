@@ -100,6 +100,7 @@
 #include <string>
 #include <vector>
 // msgs
+#include <bear_msgs/ClassMap.h>
 #include <bear_msgs/ClearClassVoxels.h>
 #include <geometry_msgs/Point.h>
 #include <sensor_msgs/LaserScan.h>
@@ -116,10 +117,12 @@
 #include <tf2/buffer_core.h>
 
 #include <mutex>
+#include <optional>
 
 #include "message_filters/subscriber.h"
 #include "multi_robot_public/RobotMotions.h"
 #include "obstacle_detector/Obstacles.h"
+#include "spatio_temporal_voxel_layer/class_map_builder.hpp"
 #include "spatio_temporal_voxel_layer/dynamic_obstacle_reading.hpp"
 #include "spatio_temporal_voxel_layer/frustum_models/footprint_frustum.hpp"
 #include "spatio_temporal_voxel_layer/robot_motion_reading.hpp"
@@ -240,6 +243,8 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
 
   void PublishClassVoxelGrids();
 
+  void PublishClassMap(double robot_x, double robot_y);
+
   // Sensor callbacks
   void LaserScanCallback(
       const sensor_msgs::LaserScanConstPtr& message,
@@ -352,6 +357,15 @@ class SpatioTemporalVoxelLayer : public costmap_2d::CostmapLayer {
     ros::Publisher publisher;
   };
   std::vector<ClassVoxelPublisher> _class_voxel_pubs;
+
+  struct ClassMapPublisher {
+    ros::Publisher publisher;
+    volume_grid::ClassMapBuilder builder;
+    // Not a local, so TakeClassMap gives the grid an already allocated vector.
+    volume_grid::ClassMapColumns columns;
+    bear_msgs::ClassMap msg;
+  };
+  std::optional<ClassMapPublisher> _class_map_publisher;
 
   ros::Publisher _blind_spot_pub;
   ros::ServiceServer _grid_saver;

@@ -104,6 +104,7 @@
 #include <openvdb/math/Ray.h>
 #include <openvdb/openvdb.h>
 // measurement struct and buffer
+#include <spatio_temporal_voxel_layer/class_map_columns.hpp>
 #include <spatio_temporal_voxel_layer/dynamic_obstacle_tracker.hpp>
 #include <spatio_temporal_voxel_layer/frustum_models/depth_camera_frustum.hpp>
 #include <spatio_temporal_voxel_layer/frustum_models/footprint_clearing_prism.hpp>
@@ -227,6 +228,10 @@ class SpatioTemporalVoxelGrid {
   void GetClassPointCloud(VoxelClass cls,
                           sensor_msgs::PointCloud2::Ptr& pc2) const;
   std::unordered_map<occupany_cell, uint>* GetFlattenedCostmap();
+
+  void SetClassMapRecording(bool enabled);
+  // Swaps with *columns; the next decay pass clears the columns swapped in.
+  void TakeClassMap(ClassMapColumns* columns);
 
   // Clear the grid
   bool ResetGrid(void);
@@ -364,7 +369,8 @@ class SpatioTemporalVoxelGrid {
           dynamic_obstacle_frustums);
 
   // Populate the costmap ROS api and pointcloud with a marked point
-  void PopulateCostmapAndPointcloud(const openvdb::Vec3d& pose_world,
+  void PopulateCostmapAndPointcloud(const openvdb::Coord& pt_index,
+                                    const openvdb::Vec3d& pose_world,
                                     VoxelClass cls);
   void FillPointCloud(const std::vector<geometry_msgs::Point32>& points,
                       sensor_msgs::PointCloud2::Ptr& pc2) const;
@@ -397,6 +403,8 @@ class SpatioTemporalVoxelGrid {
   std::array<std::vector<geometry_msgs::Point32>, kVoxelClassCount>
       _class_points;
   std::unordered_map<occupany_cell, uint>* _cost_map;
+  bool _class_map_recording = false;
+  ClassMapColumns _class_map;
   boost::mutex _grid_lock;
   std::unique_ptr<geometry::FootprintFrustum> _safety_zone_frustum;
   std::unique_ptr<geometry::InterSensorDecayPrism> _inter_sensor_decay_prism;

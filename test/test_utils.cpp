@@ -147,5 +147,23 @@ volume_grid::VoxelClassTable MakeCliffAndVehicleTable(
   return volume_grid::VoxelClassTable::Create(config).value();
 }
 
+std::optional<uint16_t> MaskAt(const bear_msgs::ClassMap& map, double x,
+                               double y) {
+  if (map.info.width == 0 || map.info.height == 0) {
+    return std::nullopt;
+  }
+  const double dx = x - map.info.origin.position.x;
+  const double dy = y - map.info.origin.position.y;
+  if (dx < 0.0 || dy < 0.0) {
+    return std::nullopt;
+  }
+  const auto ix = static_cast<std::size_t>(dx / map.info.resolution);
+  const auto iy = static_cast<std::size_t>(dy / map.info.resolution);
+  if (ix >= map.info.width || iy >= map.info.height) {
+    return std::nullopt;
+  }
+  return map.mask[iy * map.info.width + ix];
+}
+
 }  // namespace test_utils
 }  // namespace spatio_temporal_voxel_layer

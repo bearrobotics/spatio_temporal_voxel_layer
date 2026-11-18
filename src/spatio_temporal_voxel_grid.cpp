@@ -287,6 +287,7 @@ void SpatioTemporalVoxelGrid::ClearFrustums(
     points.clear();
   }
   _cost_map->clear();
+  _class_map.clear();
 
   if (this->IsGridEmpty()) {
     return;
@@ -507,7 +508,7 @@ void SpatioTemporalVoxelGrid::TemporalClearAndGenerateCostmap(
       cleared_cells.insert(occupany_cell(pose_world[0], pose_world[1]));
     } else {
       // if here, we can add to costmap and PC2
-      PopulateCostmapAndPointcloud(pose_world, cls);
+      PopulateCostmapAndPointcloud(pt_index, pose_world, cls);
     }
   }
 
@@ -590,12 +591,21 @@ std::optional<openvdb::Vec3d> SpatioTemporalVoxelGrid::CheckBox(
 
 /*****************************************************************************/
 void SpatioTemporalVoxelGrid::PopulateCostmapAndPointcloud(
-    const openvdb::Vec3d& pose_world, VoxelClass cls)
+    const openvdb::Coord& pt_index, const openvdb::Vec3d& pose_world,
+    VoxelClass cls)
 /*****************************************************************************/
 {
+  const VoxelClassPolicy& policy = _class_table.GetPolicy(cls);
+  if (_class_map_recording && policy.publish_class_map) {
+    const VoxelColumn column{pt_index.x(), pt_index.y()};
+    if (_class_map.empty() || _class_map.back().column != column) {
+      _class_map.push_back({column, 0});
+    }
+    _class_map.back().mask |= ToClassBit(cls);
+  }
+
   // add the world point to the pointcloud and costmap
-  const bool publish_class_point =
-      _class_table.GetPolicy(cls).publish_class_voxels;
+  const bool publish_class_point = policy.publish_class_voxels;
   if (_pub_voxels || publish_class_point) {
     geometry_msgs::Point32 point;
     point.x = pose_world[0];
@@ -769,6 +779,22 @@ SpatioTemporalVoxelGrid::GetFlattenedCostmap()
 /*****************************************************************************/
 {
   return _cost_map;
+}
+
+/*****************************************************************************/
+void SpatioTemporalVoxelGrid::SetClassMapRecording(bool enabled)
+/*****************************************************************************/
+{
+  boost::unique_lock<boost::mutex> lock(_grid_lock);
+  _class_map_recording = enabled;
+}
+
+/*****************************************************************************/
+void SpatioTemporalVoxelGrid::TakeClassMap(ClassMapColumns* columns)
+/*****************************************************************************/
+{
+  boost::unique_lock<boost::mutex> lock(_grid_lock);
+  columns->swap(_class_map);
 }
 
 /*****************************************************************************/
